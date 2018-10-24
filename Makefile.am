@@ -29,7 +29,7 @@ bin_PROGRAMS = janus
 
 headerdir = $(includedir)/janus
 header_HEADERS = apierror.h config.h log.h debug.h mutex.h record.h \
-	rtcp.h rtp.h rtpsrtp.h sdp-utils.h ip-utils.h utils.h refcount.h text2pcap.h
+	rtcp.h rtp.h rtpsrtp.h sdp-utils.h ip-utils.h utils.h text2pcap.h
 
 pluginsheaderdir = $(includedir)/janus/plugins
 pluginsheader_HEADERS = plugins/plugin.h
@@ -44,7 +44,7 @@ confdir = $(sysconfdir)/janus
 conf_DATA = conf/janus.cfg.sample
 
 certdir = $(datadir)/janus/certs
-dist_cert_DATA = certs/mycert.key certs/mycert.pem
+cert_DATA = certs/mycert.key certs/mycert.pem
 
 plugindir = $(libdir)/janus/plugins
 plugin_LTLIBRARIES = $(NULL)
@@ -56,19 +56,13 @@ eventdir = $(libdir)/janus/events
 event_LTLIBRARIES = $(NULL)
 
 SUBDIRS = html
-dist_html_DATA = README.md
+html_DATA = README.md
 
 streamdir = $(datadir)/janus/streams
 stream_DATA = $(NULL)
 
 recordingsdir = $(datadir)/janus/recordings
 recordings_DATA = $(NULL)
-
-luadir = $(datadir)/janus/lua
-lua_DATA = $(NULL)
-
-duktapedir = $(datadir)/janus/duktape
-duktape_DATA = $(NULL)
 
 demosdir = $(datadir)/janus/demos
 demos_DATA = $(NULL)
@@ -86,9 +80,7 @@ jsmodules_DATA = html/janus.js
 	    s|[@]eventdir[@]|$(eventdir)|;\
 	    s|[@]recordingsdir[@]|$(recordingsdir)|;\
 	    s|[@]demosdir[@]|$(demosdir)|;\
-	    s|[@]streamdir[@]|$(streamdir)|; \
-	    s|[@]luadir[@]|$(luadir)|; \
-	    s|[@]duktapedir[@]|$(duktapedir)|" \
+	    s|[@]streamdir[@]|$(streamdir)|" \
 	$< > $@ || rm $@
 
 EXTRA_DIST += conf/janus.cfg.sample.in
@@ -123,7 +115,6 @@ janus_SOURCES = \
 	mutex.h \
 	record.c \
 	record.h \
-	refcount.h \
 	rtcp.c \
 	rtcp.h \
 	rtp.c \
@@ -148,7 +139,6 @@ janus_SOURCES = \
 	plugins/plugin.c \
 	plugins/plugin.h \
 	transports/transport.h \
-	transports/transport.c \
 	events/eventhandler.h \
 	$(NULL)
 
@@ -168,11 +158,9 @@ janus_LDADD = \
 	$(JANUS_MANUAL_LIBS) \
 	$(NULL)
 
-dist_man1_MANS = janus.1
+man1_MANS = janus.1
 
 BUILT_SOURCES = cmdline.c cmdline.h version.c
-
-cmdline.h: cmdline.c
 
 cmdline.c: janus.c
 	gengetopt --set-package="janus" --set-version="$(VERSION)" < janus.ggo
@@ -254,7 +242,7 @@ if ENABLE_MQTT
 transport_LTLIBRARIES += transports/libjanus_mqtt.la
 transports_libjanus_mqtt_la_SOURCES = transports/janus_mqtt.c
 transports_libjanus_mqtt_la_CFLAGS = $(transports_cflags)
-transports_libjanus_mqtt_la_LDFLAGS = $(transports_ldflags) -lpaho-mqtt3as
+transports_libjanus_mqtt_la_LDFLAGS = $(transports_ldflags) -lpaho-mqtt3a
 transports_libjanus_mqtt_la_LIBADD = $(transports_libadd)
 conf_DATA += conf/janus.transport.mqtt.cfg.sample
 EXTRA_DIST += conf/janus.transport.mqtt.cfg.sample
@@ -264,20 +252,10 @@ if ENABLE_PFUNIX
 transport_LTLIBRARIES += transports/libjanus_pfunix.la
 transports_libjanus_pfunix_la_SOURCES = transports/janus_pfunix.c
 transports_libjanus_pfunix_la_CFLAGS = $(transports_cflags)
-transports_libjanus_pfunix_la_LDFLAGS = $(transports_ldflags) $(LIBSYSTEMD_LIBS)
+transports_libjanus_pfunix_la_LDFLAGS = $(transports_ldflags)
 transports_libjanus_pfunix_la_LIBADD = $(transports_libadd)
 conf_DATA += conf/janus.transport.pfunix.cfg.sample
 EXTRA_DIST += conf/janus.transport.pfunix.cfg.sample
-endif
-
-if ENABLE_NANOMSG
-transport_LTLIBRARIES += transports/libjanus_nanomsg.la
-transports_libjanus_nanomsg_la_SOURCES = transports/janus_nanomsg.c
-transports_libjanus_nanomsg_la_CFLAGS = $(transports_cflags)
-transports_libjanus_nanomsg_la_LDFLAGS = $(transports_ldflags) -lnanomsg
-transports_libjanus_nanomsg_la_LIBADD = $(transports_libadd)
-conf_DATA += conf/janus.transport.nanomsg.cfg.sample
-EXTRA_DIST += conf/janus.transport.nanomsg.cfg.sample
 endif
 
 ##
@@ -311,16 +289,6 @@ events_libjanus_rabbitmqevh_la_LDFLAGS = $(events_ldflags) -lrabbitmq
 events_libjanus_rabbitmqevh_la_LIBADD = $(events_libadd)
 conf_DATA += conf/janus.eventhandler.rabbitmqevh.cfg.sample
 EXTRA_DIST += conf/janus.eventhandler.rabbitmqevh.cfg.sample
-endif
-
-if ENABLE_MQTTEVH
-event_LTLIBRARIES += events/libjanus_mqttevh.la
-events_libjanus_mqttevh_la_SOURCES = events/janus_mqttevh.c
-events_libjanus_mqttevh_la_CFLAGS = $(events_cflags)
-events_libjanus_mqttevh_la_LDFLAGS = $(events_ldflags) -lpaho-mqtt3as
-events_libjanus_mqttevh_la_LIBADD = $(events_libadd)
-conf_DATA += conf/janus.eventhandler.mqttevh.cfg.sample
-EXTRA_DIST += conf/janus.eventhandler.mqttevh.cfg.sample
 endif
 
 ##
@@ -449,7 +417,6 @@ plugins_libjanus_voicemail_la_LDFLAGS = $(plugins_ldflags) -logg
 plugins_libjanus_voicemail_la_LIBADD = $(plugins_libadd)
 conf_DATA += conf/janus.plugin.voicemail.cfg.sample
 EXTRA_DIST += conf/janus.plugin.voicemail.cfg.sample.in
-CLEANFILES += conf/janus.plugin.voicemail.cfg.sample
 endif
 
 if ENABLE_PLUGIN_TEXTROOM
@@ -462,38 +429,25 @@ conf_DATA += conf/janus.plugin.textroom.cfg.sample
 EXTRA_DIST += conf/janus.plugin.textroom.cfg.sample
 endif
 
-if ENABLE_PLUGIN_LUA
-plugin_LTLIBRARIES += plugins/libjanus_lua.la
-plugins_libjanus_lua_la_SOURCES = plugins/janus_lua.c plugins/janus_lua_data.h plugins/janus_lua_extra.c plugins/janus_lua_extra.h
-plugins_libjanus_lua_la_CFLAGS = $(plugins_cflags) $(LUA_CFLAGS)
-plugins_libjanus_lua_la_LDFLAGS = $(plugins_ldflags) $(LUA_LDFLAGS) $(LUA_LIBS)
-plugins_libjanus_lua_la_LIBADD = $(plugins_libadd) $(LUA_LIBADD)
-conf_DATA += conf/janus.plugin.lua.cfg.sample
-lua_DATA += \
-	plugins/lua/echotest.lua \
-	plugins/lua/videoroom.lua \
-	plugins/lua/janus-logger.lua \
-	plugins/lua/janus-sdp.lua
-EXTRA_DIST += conf/janus.plugin.lua.cfg.sample.in
+if ENABLE_PLUGIN_PTZ
+plugin_LTLIBRARIES += plugins/libjanus_ptz.la
+plugins_libjanus_ptz_la_SOURCES = plugins/janus_ptz.c
+plugins_libjanus_ptz_la_CFLAGS = $(plugins_cflags)
+plugins_libjanus_ptz_la_LDFLAGS = $(plugins_ldflags)
+plugins_libjanus_ptz_la_LIBADD = $(plugins_libadd)
+#conf_DATA += conf/janus.plugin.ptz.cfg.sample
+#EXTRA_DIST += conf/janus.plugin.ptz.cfg.sample
 endif
 
-if ENABLE_PLUGIN_DUKTAPE
-plugin_LTLIBRARIES += plugins/libjanus_duktape.la
-plugins_libjanus_duktape_la_SOURCES = plugins/janus_duktape.c \
-	plugins/janus_duktape_data.h plugins/janus_duktape_extra.c plugins/janus_duktape_extra.h \
-	plugins/duktape-deps/duktape.c plugins/duktape-deps/duk_config.h plugins/duktape-deps/duktape.h \
-	plugins/duktape-deps/duk_module_duktape.c plugins/duktape-deps/duk_module_duktape.h \
-	plugins/duktape-deps/duk_console.c plugins/duktape-deps/duk_console.h
-plugins_libjanus_duktape_la_CFLAGS = $(plugins_cflags) $(DUKTAPE_CFLAGS)
-plugins_libjanus_duktape_la_LDFLAGS = $(plugins_ldflags) $(DUKTAPE_LDFLAGS) $(DUKTAPE_LIBS)
-plugins_libjanus_duktape_la_LIBADD = $(plugins_libadd) $(DUKTAPE_LIBADD)
-conf_DATA += conf/janus.plugin.duktape.cfg.sample
-duktape_DATA += \
-	plugins/duktape/echotest.js \
-	plugins/duktape/janus-sdp.js
-EXTRA_DIST += conf/janus.plugin.duktape.cfg.sample.in
+if ENABLE_PLUGIN_VIDEOMUX
+plugin_LTLIBRARIES += plugins/libjanus_videomux.la
+plugins_libjanus_videomux_la_SOURCES = plugins/janus_videomux.c
+plugins_libjanus_videomux_la_CFLAGS = $(plugins_cflags)
+plugins_libjanus_videomux_la_LDFLAGS = $(plugins_ldflags)
+plugins_libjanus_videomux_la_LIBADD = $(plugins_libadd)
+#conf_DATA += conf/janus.plugin.videomux.cfg.sample
+#EXTRA_DIST += conf/janus.plugin.videomux.cfg.sample
 endif
-
 
 ##
 # Post-processing
@@ -501,6 +455,7 @@ endif
 
 if ENABLE_POST_PROCESSING
 bin_PROGRAMS += janus-pp-rec
+man1_MANS += postprocessing/janus-pp-rec.1
 
 janus_pp_rec_SOURCES = \
 	postprocessing/pp-g711.c \
@@ -531,7 +486,6 @@ janus_pp_rec_LDADD = \
 	$(POST_PROCESSING_LIBS) \
 	$(NULL)
 endif
-dist_man1_MANS += postprocessing/janus-pp-rec.1
 
 ##
 # Docs
@@ -547,21 +501,27 @@ endif
 
 if ENABLE_JAVASCRIPT_ES_MODULE
 jsmodules_DATA += npm/bundles/janus.es.js
+EXTRA_DIST += npm/bundles/janus.es.js
+CLEANFILES += npm/bundles/janus.es.js
 endif
 
 if ENABLE_JAVASCRIPT_UMD_MODULE
 jsmodules_DATA += npm/bundles/janus.umd.js
+EXTRA_DIST += npm/bundles/janus.umd.js
+CLEANFILES += npm/bundles/janus.umd.js
 endif
 
 if ENABLE_JAVASCRIPT_IIFE_MODULE
 jsmodules_DATA += npm/bundles/janus.iife.js
+EXTRA_DIST += npm/bundles/janus.iife.js
+CLEANFILES += npm/bundles/janus.iife.js
 endif
 
 if ENABLE_JAVASCRIPT_COMMON_JS_MODULE
 jsmodules_DATA += npm/bundles/janus.cjs.js
+EXTRA_DIST += npm/bundles/janus.cjs.js
+CLEANFILES += npm/bundles/janus.cjs.js
 endif
-
-EXTRA_DIST += $(jsmodules_DATA)
 
 if ENABLE_JAVASCRIPT_MODULES
 
