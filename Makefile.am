@@ -139,6 +139,7 @@ janus_SOURCES = \
 	plugins/plugin.c \
 	plugins/plugin.h \
 	transports/transport.h \
+	transports/transport.c \
 	events/eventhandler.h \
 	$(NULL)
 
