@@ -49,7 +49,7 @@ void janus_ptz_setup_media(janus_plugin_session *handle);
 void janus_ptz_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_ptz_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_ptz_incoming_data(janus_plugin_session *handle, char *buf, int len);
-void janus_ptz_slow_link(janus_plugin_session *handle, int uplink, int video);
+void janus_ptz_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks);
 void janus_ptz_hangup_media(janus_plugin_session *handle);
 void janus_ptz_destroy_session(janus_plugin_session *handle, int *error);
 json_t *janus_ptz_query_session(janus_plugin_session *handle);
@@ -709,7 +709,7 @@ msg_response:
 	return NULL;
 }
 
-void janus_ptz_slow_link(janus_plugin_session *handle, int uplink, int video) {
+void janus_ptz_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks) {
 	/* We don't do audio/video */
 }
 

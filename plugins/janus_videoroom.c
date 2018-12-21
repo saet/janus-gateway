@@ -1040,7 +1040,7 @@ void janus_videoroom_setup_media(janus_plugin_session *handle);
 void janus_videoroom_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_videoroom_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_videoroom_incoming_data(janus_plugin_session *handle, char *buf, int len);
-void janus_videoroom_slow_link(janus_plugin_session *handle, int uplink, int video);
+void janus_videoroom_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks);
 void janus_videoroom_hangup_media(janus_plugin_session *handle);
 void janus_videoroom_destroy_session(janus_plugin_session *handle, int *error);
 json_t *janus_videoroom_query_session(janus_plugin_session *handle);
@@ -4069,7 +4069,7 @@ void janus_videoroom_incoming_data(janus_plugin_session *handle, char *buf, int 
 	janus_videoroom_publisher_dereference_nodebug(participant);
 }
 
-void janus_videoroom_slow_link(janus_plugin_session *handle, int uplink, int video) {
+void janus_videoroom_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks) {
 	/* The core is informing us that our peer got too many NACKs, are we pushing media too hard? */
 	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || !gateway)
 		return;

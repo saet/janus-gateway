@@ -1424,7 +1424,7 @@ janus_slow_link_update(janus_ice_component *component, janus_ice_handle *handle,
 		if(plugin && plugin->slow_link && janus_plugin_session_is_alive(handle->app_handle) &&
 				!g_atomic_int_get(&handle->app_handle->stopped) &&
 				!g_atomic_int_get(&handle->destroyed))
-			plugin->slow_link(handle->app_handle, uplink, video);
+			plugin->slow_link(handle->app_handle, uplink, video, nacks);
 		/* Notify the user/application too */
 		janus_session *session = (janus_session *)handle->session;
 		if(session != NULL) {
@@ -2565,7 +2565,7 @@ static void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint comp
 					}
 					component->retransmit_recent_cnt += retransmits_cnt;
 					/* FIXME Remove the NACK compound packet, we've handled it */
-					buflen = janus_rtcp_remove_nacks(buf, buflen);
+					//buflen = janus_rtcp_remove_nacks(buf, buflen);
 					/* Update stats */
 					if(video) {
 						component->in_stats.video[vindex].nacks += nacks_count;

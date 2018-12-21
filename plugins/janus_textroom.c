@@ -474,7 +474,7 @@ void janus_textroom_setup_media(janus_plugin_session *handle);
 void janus_textroom_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_textroom_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_textroom_incoming_data(janus_plugin_session *handle, char *buf, int len);
-void janus_textroom_slow_link(janus_plugin_session *handle, int uplink, int video);
+void janus_textroom_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks);
 void janus_textroom_hangup_media(janus_plugin_session *handle);
 void janus_textroom_destroy_session(janus_plugin_session *handle, int *error);
 json_t *janus_textroom_query_session(janus_plugin_session *handle);
@@ -2241,7 +2241,7 @@ msg_response:
 	return NULL;
 }
 
-void janus_textroom_slow_link(janus_plugin_session *handle, int uplink, int video) {
+void janus_textroom_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks) {
 	/* We don't do audio/video */
 }
 

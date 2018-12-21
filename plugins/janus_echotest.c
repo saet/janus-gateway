@@ -135,7 +135,7 @@ void janus_echotest_setup_media(janus_plugin_session *handle);
 void janus_echotest_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_echotest_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_echotest_incoming_data(janus_plugin_session *handle, char *buf, int len);
-void janus_echotest_slow_link(janus_plugin_session *handle, int uplink, int video);
+void janus_echotest_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks);
 void janus_echotest_hangup_media(janus_plugin_session *handle);
 void janus_echotest_destroy_session(janus_plugin_session *handle, int *error);
 json_t *janus_echotest_query_session(janus_plugin_session *handle);
@@ -726,7 +726,7 @@ void janus_echotest_incoming_data(janus_plugin_session *handle, char *buf, int l
 	}
 }
 
-void janus_echotest_slow_link(janus_plugin_session *handle, int uplink, int video) {
+void janus_echotest_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks) {
 	/* The core is informing us that our peer got or sent too many NACKs, are we pushing media too hard? */
 	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
