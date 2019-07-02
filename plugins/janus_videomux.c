@@ -20,8 +20,8 @@
 #include "../utils.h"
 
 /* Plugin information */
-#define JANUS_VIDEOMUX_VERSION			2
-#define JANUS_VIDEOMUX_VERSION_STRING	"0.0.2"
+#define JANUS_VIDEOMUX_VERSION			3
+#define JANUS_VIDEOMUX_VERSION_STRING	"0.0.3"
 #define JANUS_VIDEOMUX_DESCRIPTION		"This is a plugin implementing a stream selection API for Janus."
 #define JANUS_VIDEOMUX_NAME				"JANUS VideoMux plugin"
 #define JANUS_VIDEOMUX_AUTHOR			"ISMB <bertone@imsb.it>"
@@ -44,7 +44,7 @@ void janus_videomux_setup_media(janus_plugin_session *handle);
 void janus_videomux_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_videomux_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_videomux_incoming_data(janus_plugin_session *handle, char *buf, int len);
-void janus_videomux_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks);
+void janus_videomux_slow_link(janus_plugin_session *handle, int uplink, int video);
 void janus_videomux_hangup_media(janus_plugin_session *handle);
 void janus_videomux_destroy_session(janus_plugin_session *handle, int *error);
 json_t *janus_videomux_query_session(janus_plugin_session *handle);
@@ -638,15 +638,15 @@ janus_plugin_result *janus_videomux_handle_incoming_request(janus_plugin_session
 	JANUS_VALIDATE_JSON_OBJECT(root, transaction_parameters,
 		error_code, error_cause, TRUE,
 		JANUS_VIDEOMUX_ERROR_MISSING_ELEMENT, JANUS_VIDEOMUX_ERROR_INVALID_ELEMENT);
-	//const char *transaction_text = NULL;
+	const char *transaction_text = NULL;
 	json_t *reply = NULL;
 	if(error_code != 0)
 		goto msg_response;
 
 	json_t *request = json_object_get(root, "videomux");
-	//json_t *transaction = json_object_get(root, "transaction");
+	json_t *transaction = json_object_get(root, "transaction");
 	const char *request_text = json_string_value(request);
-	//transaction_text = json_string_value(transaction);
+	transaction_text = json_string_value(transaction);
 
 	/* Start preparing the response too */
 	reply = json_object();
@@ -654,17 +654,17 @@ janus_plugin_result *janus_videomux_handle_incoming_request(janus_plugin_session
 	if(!strcasecmp(request_text, "open")) {
 
 		if (session->slot > 0) {
-			JANUS_LOG(LOG_WARN, "VideoMUX: OPEN session %lld, already opened with slot %d\n", session->sdp_sessid, session->slot);
+			JANUS_LOG(LOG_WARN, "VideoMUX: OPEN session %llu, already opened with slot %d\n", session->sdp_sessid, session->slot);
 			json_object_set_new(reply, "videomux", json_string("success"));
 			json_object_set_new(reply, "slot", json_integer(session->slot));
 		} else {
-			JANUS_LOG(LOG_INFO, "VideoMUX: OPEN session %lld\n", session->sdp_sessid);
+			JANUS_LOG(LOG_INFO, "VideoMUX: OPEN session %llu\n", session->sdp_sessid);
 
 			struct string s;
 			int init_res;
   		init_res = init_string(&s);
 			if (init_res >= 0) {
-				sprintf(vvurl, "%s/session/%lld", SERVICE_URL, session->sdp_sessid);
+				sprintf(vvurl, "%s/session/%llu", SERVICE_URL, session->sdp_sessid);
 				curl_easy_setopt(curl, CURLOPT_URL, vvurl);
 				curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunc);
   			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &s);
@@ -675,6 +675,7 @@ janus_plugin_result *janus_videomux_handle_incoming_request(janus_plugin_session
 		      fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
 					error_code = JANUS_VIDEOMUX_ERROR_CONNECTION_ERROR;
 					g_snprintf(error_cause, 512, "Connection error (curl_easy_perform)");
+					free(s.ptr);
 					goto msg_response;
 				} else {
 					JANUS_LOG(LOG_INFO, "\t\tVideoMUX: GOT OPEN response: %s\n", s.ptr);
@@ -731,13 +732,13 @@ janus_plugin_result *janus_videomux_handle_incoming_request(janus_plugin_session
 		}
 	} else if(!strcasecmp(request_text, "close")) {
 		// TODO: check if session->slot != 0
-		JANUS_LOG(LOG_INFO, "VideoMUX: CLOSE session %lld\n", session->sdp_sessid);
+		JANUS_LOG(LOG_INFO, "VideoMUX: CLOSE session %llu\n", session->sdp_sessid);
 
 		if (session->slot <= 0) {
-			JANUS_LOG(LOG_WARN, "VideoMUX: CLOSE session %lld: no slot\n", session->sdp_sessid);
+			JANUS_LOG(LOG_WARN, "VideoMUX: CLOSE session %llu: no slot\n", session->sdp_sessid);
 		} else {
 			curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-			sprintf(vvurl, "%s/session/%lld", SERVICE_URL, session->sdp_sessid);
+			sprintf(vvurl, "%s/session/%llu", SERVICE_URL, session->sdp_sessid);
 			curl_easy_setopt(curl, CURLOPT_URL, vvurl);
 			res = curl_easy_perform(curl);
 			curl_easy_cleanup(curl);
@@ -746,11 +747,11 @@ janus_plugin_result *janus_videomux_handle_incoming_request(janus_plugin_session
 		json_object_set_new(reply, "videomux", json_string("success"));
 	} else if (!strcasecmp(request_text, "stop")) {
 
-		JANUS_LOG(LOG_INFO, "VideoMUX: STOP session %lld\n", session->sdp_sessid);
+		JANUS_LOG(LOG_INFO, "VideoMUX: STOP session %llu\n", session->sdp_sessid);
 		if (session->slot <= 0) {
-			JANUS_LOG(LOG_WARN, "VideoMUX: STOP session %lld: no slot\n", session->sdp_sessid);
+			JANUS_LOG(LOG_WARN, "VideoMUX: STOP session %llu: no slot\n", session->sdp_sessid);
 		} else {
-			sprintf(vvurl, "%s/stop?id=%lld", SERVICE_URL, session->sdp_sessid);
+			sprintf(vvurl, "%s/stop?id=%llu", SERVICE_URL, session->sdp_sessid);
 			curl_easy_setopt(curl, CURLOPT_URL, vvurl);
 			res = curl_easy_perform(curl);
 			curl_easy_cleanup(curl);
@@ -759,7 +760,7 @@ janus_plugin_result *janus_videomux_handle_incoming_request(janus_plugin_session
 	} else if(!strcasecmp(request_text, "watch")) {
 		if (session->slot <= 0) {
 			// TODO: return error
-			JANUS_LOG(LOG_WARN, "VideoMUX: WATCH session %lld: no slot\n", session->sdp_sessid);
+			JANUS_LOG(LOG_WARN, "VideoMUX: WATCH session %llu: no slot\n", session->sdp_sessid);
 			error_code = JANUS_VIDEOMUX_ERROR_NO_SLOT;
 			g_snprintf(error_cause, 512, "No slot reserved");
 			goto msg_response;
@@ -785,12 +786,12 @@ janus_plugin_result *janus_videomux_handle_incoming_request(janus_plugin_session
 
 				if (cam_ref != NULL) {
 					int cam_id = json_integer_value(cam_ref);
-					sprintf(vvurl, "%s/view?id=%lld&cam=%d", SERVICE_URL, session->sdp_sessid, cam_id);
+					sprintf(vvurl, "%s/view?id=%llu&cam=%d", SERVICE_URL, session->sdp_sessid, cam_id);
 				} else if (hash_ref != NULL && sens_ref != NULL && time_ref != NULL) {
 					const char *hash = json_string_value(hash_ref);
 					const char *sens = json_string_value(sens_ref);
 					const char *timev = json_string_value(time_ref);
-					sprintf(vvurl, "%s/view?id=%lld&hash=%s&sens=%s&time=%s", SERVICE_URL, session->sdp_sessid, hash, sens, timev);
+					sprintf(vvurl, "%s/view?id=%llu&hash=%s&sens=%s&time=%s", SERVICE_URL, session->sdp_sessid, hash, sens, timev);
 				} else {
 					JANUS_LOG(LOG_ERR, "Watch: no parameters\n");
 					error_code = JANUS_VIDEOMUX_ERROR_MISSING_ELEMENT;
@@ -808,6 +809,7 @@ janus_plugin_result *janus_videomux_handle_incoming_request(janus_plugin_session
 					JANUS_LOG(LOG_WARN, "Curl error\n");
 					error_code = JANUS_VIDEOMUX_ERROR_CONNECTION_ERROR;
 					g_snprintf(error_cause, 512, "Connection error (curl_easy_perform)");
+					free(s.ptr);
 					goto msg_response;
 				} else {
 					JANUS_LOG(LOG_INFO, "\t\tVideoMUX: GOT OPEN response: %s\n", s.ptr);
@@ -897,7 +899,7 @@ msg_response:
 	return NULL;
 }
 
-void janus_videomux_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks) {
+void janus_videomux_slow_link(janus_plugin_session *handle, int uplink, int video) {
 	/* We don't do audio/video */
 }
 
