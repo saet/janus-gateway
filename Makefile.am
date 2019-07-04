@@ -450,6 +450,16 @@ plugins_libjanus_videomux_la_LIBADD = $(plugins_libadd)
 #EXTRA_DIST += conf/janus.plugin.videomux.cfg.sample
 endif
 
+if ENABLE_PLUGIN_FRAME
+plugin_LTLIBRARIES += plugins/libjanus_frame.la
+plugins_libjanus_frame_la_SOURCES = plugins/janus_frame.c
+plugins_libjanus_frame_la_CFLAGS = $(plugins_cflags)
+plugins_libjanus_frame_la_LDFLAGS = $(plugins_ldflags)
+plugins_libjanus_frame_la_LIBADD = $(plugins_libadd)
+#conf_DATA += conf/janus.plugin.frame.cfg.sample
+#EXTRA_DIST += conf/janus.plugin.frame.cfg.sample
+endif
+
 ##
 # Post-processing
 ##

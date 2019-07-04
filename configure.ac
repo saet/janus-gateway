@@ -112,6 +112,8 @@ AC_ARG_ENABLE([all-plugins],
                      [enable_plugin_ptz=no])
                AS_IF([test "x$enable_plugin_videomux" != "xyes"],
                      [enable_plugin_videomux=no])
+               AS_IF([test "x$enable_plugin_frame" != "xyes"],
+                     [enable_plugin_frame=no])
               ],
               [])
 
@@ -585,6 +587,13 @@ AC_ARG_ENABLE([plugin-videomux],
                      [enable_plugin_videomux=no])],
               [enable_plugin_videomux=yes])
 
+AC_ARG_ENABLE([plugin-frame],
+              [AS_HELP_STRING([--disable-plugin-frame],
+                              [Disable frame plugin])],
+              [AS_IF([test "x$enable_plugin_frame" != "xyes"],
+                     [enable_plugin_frame=no])],
+              [enable_plugin_frame=yes])
+
 PKG_CHECK_MODULES([SOFIA],
                   [sofia-sip-ua],
                   [
@@ -672,6 +681,7 @@ AM_CONDITIONAL([ENABLE_PLUGIN_VOICEMAIL], [test "x$enable_plugin_voicemail" = "x
 AM_CONDITIONAL([ENABLE_PLUGIN_TEXTROOM], [test "x$enable_plugin_textroom" = "xyes"])
 AM_CONDITIONAL([ENABLE_PLUGIN_PTZ], [test "x$enable_plugin_ptz" = "xyes"])
 AM_CONDITIONAL([ENABLE_PLUGIN_VIDEOMUX], [test "x$enable_plugin_videomux" = "xyes"])
+AM_CONDITIONAL([ENABLE_PLUGIN_FRAME], [test "x$enable_plugin_frame" = "xyes"])
 
 
 ##
@@ -859,6 +869,9 @@ AM_COND_IF([ENABLE_PLUGIN_PTZ],
 AM_COND_IF([ENABLE_PLUGIN_VIDEOMUX],
 	[echo "    Videomux:              yes"],
 	[echo "    Videomux:              no"])
+AM_COND_IF([ENABLE_PLUGIN_FRAME],
+        [echo "    Frame:                yes"],
+        [echo "    Frame:                no"])
 echo "Event handlers:"
 AM_COND_IF([ENABLE_SAMPLEEVH],
 	[echo "    Sample event handler:  yes"],

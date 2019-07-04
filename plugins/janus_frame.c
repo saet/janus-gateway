@@ -49,11 +49,11 @@ void janus_frame_setup_media(janus_plugin_session *handle);
 void janus_frame_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_frame_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_frame_incoming_data(janus_plugin_session *handle, char *buf, int len);
-void janus_frame_slow_link(janus_plugin_session *handle, int uplink, int video);
+void janus_frame_slow_link(janus_plugin_session *handle, int uplink, int video, int naks);
 void janus_frame_hangup_media(janus_plugin_session *handle);
 void janus_frame_destroy_session(janus_plugin_session *handle, int *error);
 json_t *janus_frame_query_session(janus_plugin_session *handle);
-void janus_frame_queue_request(janus_plugin_session *handle, int cam, int hd);
+void janus_frame_queue_request(janus_plugin_session *handle, int cam, int hd, int once);
 void janus_frame_stop(janus_plugin_session *handle);
 
 /* Plugin setup */
@@ -98,11 +98,13 @@ static struct janus_json_parameter transaction_parameters[] = {
 };
 #endif
 
+#if 0
 static struct janus_json_parameter message_parameters[] = {
 	{"cam", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
 	{"command", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
 	{"ack", JANUS_JSON_BOOL, 0}
 };
+#endif
 
 /* Useful stuff */
 static volatile gint initialized = 0, stopping = 0;
@@ -130,11 +132,12 @@ struct {
   janus_mutex mutex;
   unsigned int request;
   unsigned int waitkf;
+  unsigned int once;
   unsigned int ready;
   char *data;
   int datalen;
   GThread *thread;
-} janus_frames[8+1][2] = {{{0, }, 0, 0, NULL, 0, NULL}, };
+} janus_frames[8+1][2] = {0, };
 
 janus_plugin_session *janus_handle_session[32];
 
@@ -609,10 +612,10 @@ static void* janus_frame_data_handler(void *data)
 	
 	janus_mutex_unlock(&data_mutex);
 	
-	CURLcode res;
+	//CURLcode res;
 	char frameurl[128];
-	json_t *jresp, *reply = NULL;
-	char *reply_text = NULL;
+	//json_t *jresp, *reply = NULL;
+	//char *reply_text = NULL;
 	string s;
 	
 	CURL *curl;
@@ -632,10 +635,7 @@ static void* janus_frame_data_handler(void *data)
 	while(1)
 	{
 		init_string(&s);
-//JANUS_LOG(LOG_ERR, "Request %d-%d %p %s\n", cam, hd, curl, frameurl);
-		res = curl_easy_perform(curl);
-//JANUS_LOG(LOG_ERR, "Sending %d-%d\n", cam, hd);
-//JANUS_LOG(LOG_ERR, "Sending %d-%d\n%s\n", cam, hd, reply_text);
+		curl_easy_perform(curl);
 		int i, k, ready = 0xffffffff;
 		/* Invio il frame a tutti gli handle in attesa */
 		/* Il lock va anticipato in questo punto per via dell'handle? Provare. */
@@ -652,10 +652,13 @@ static void* janus_frame_data_handler(void *data)
 			{
 //printf("relay cam %d hd %d session %d\n", cam, hd, i);
 //fflush(stdout);
-//JANUS_LOG(LOG_ERR, "Sending %d-%d %d handle %p\n", cam, hd, i, janus_handle_session[i]);
-				//janus_frames[cam][hd].request &= ~(1<<i);
 				if((janus_frames[cam][hd].waitkf & (1<<i)) && !k) continue;
 				janus_frames[cam][hd].waitkf &= ~(1<<i);
+				if(janus_frames[cam][hd].once & (1<<i))
+				{
+				  janus_frames[cam][hd].once &= ~(1<<i);
+				  janus_frames[cam][hd].request &= ~(1<<i);
+				}
 				ready &= ~(1<<i);
 				gateway->relay_data(janus_handle_session[i], janus_frames[cam][hd].data, janus_frames[cam][hd].datalen);
 			}
@@ -671,7 +674,7 @@ static void* janus_frame_data_handler(void *data)
 	return NULL;
 }
 
-void janus_frame_queue_request(janus_plugin_session *handle, int cam, int hd)
+void janus_frame_queue_request(janus_plugin_session *handle, int cam, int hd, int once)
 {
 	janus_frame_session *session = (janus_frame_session *)handle->plugin_handle;
 	//json_t *reply = NULL;
@@ -715,6 +718,15 @@ printf("request cam %d hd %d session %d\n", cam, hd, session->id);
 fflush(stdout);
 			janus_frames[cam][hd].waitkf |= (1<<session->id);
 			janus_frames[cam][hd].request |= (1<<session->id);
+			janus_frames[cam][hd].once &= ~(1<<session->id);
+		}
+		if(once)
+		{
+printf("request cam %d hd %d session %d (once)\n", cam, hd, session->id);
+fflush(stdout);
+			janus_frames[cam][hd].waitkf |= (1<<session->id);
+			janus_frames[cam][hd].request |= (1<<session->id);
+			janus_frames[cam][hd].once |= (1<<session->id);
 		}
 	}
 	janus_mutex_unlock(&janus_frames[cam][hd].mutex);
@@ -781,14 +793,16 @@ janus_plugin_result *janus_frame_handle_incoming_request(janus_plugin_session *h
 		//	goto msg_response;
 		json_t *cam_ref = json_object_get(root, "cam");
 		json_t *cam_hd = json_object_get(root, "hd");
+		json_t *cam_once = json_object_get(root, "once");
 		
 		if (cam_ref != NULL) {
-			int cam_id, hd;
+			int cam_id, hd, once;
 			
 			cam_id = json_integer_value(cam_ref);
-			hd = 0;
+			hd = once = 0;
 			if(cam_hd != NULL) hd = json_integer_value(cam_hd);
-			janus_frame_queue_request(handle, cam_id, hd);
+			if(cam_once != NULL) hd = json_integer_value(cam_once);
+			janus_frame_queue_request(handle, cam_id, hd, once);
 			
 			json_decref(root);
 			return NULL;
@@ -846,7 +860,7 @@ janus_plugin_result *janus_frame_handle_incoming_request(janus_plugin_session *h
 		g_snprintf(error_cause, 512, "Unsupported request %s", request_text);
 	}
 
-msg_response:
+//msg_response:
 		{
 			if(!internal) {
 				if(error_code == 0 && !reply) {
@@ -880,7 +894,7 @@ msg_response:
 	return NULL;
 }
 
-void janus_frame_slow_link(janus_plugin_session *handle, int uplink, int video) {
+void janus_frame_slow_link(janus_plugin_session *handle, int uplink, int video, int naks) {
 	/* We don't do audio/video */
 }
 
