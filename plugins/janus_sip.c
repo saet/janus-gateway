@@ -10,7 +10,7 @@
  * \page sipsofia SIP plugin documentation
  * This is a simple SIP plugin for Janus, allowing WebRTC peers
  * to register at a SIP server (e.g., Asterisk) and call SIP user agents
- * through a Janus instance. Specifically, when attaching to the plugin peers
+ * through the gateway. Specifically, when attaching to the plugin peers
  * are requested to provide their SIP server credentials, i.e., the address
  * of the SIP server and their username/secret. This results in the plugin
  * registering at the SIP server and acting as a SIP client on behalf of
@@ -424,7 +424,7 @@
 /* Plugin information */
 #define JANUS_SIP_VERSION			7
 #define JANUS_SIP_VERSION_STRING	"0.0.7"
-#define JANUS_SIP_DESCRIPTION		"This is a simple SIP plugin for Janus, allowing WebRTC peers to register at a SIP server and call SIP user agents through a Janus instance."
+#define JANUS_SIP_DESCRIPTION		"This is a simple SIP plugin for Janus, allowing WebRTC peers to register at a SIP server and call SIP user agents through the gateway."
 #define JANUS_SIP_NAME				"JANUS SIP plugin"
 #define JANUS_SIP_AUTHOR			"Meetecho s.r.l."
 #define JANUS_SIP_PACKAGE			"janus.plugin.sip"
@@ -720,7 +720,7 @@ static void janus_sip_session_free(const janus_refcount *session_ref) {
 	janus_refcount_decrease(&session->handle->ref);
 	/* This session can be destroyed, free all the resources */
 	if(session->account.identity) {
-		g_hash_table_remove(identities, session->account.identity);
+	    g_hash_table_remove(identities, session->account.identity);
 		g_free(session->account.identity);
 		session->account.identity = NULL;
 	}
@@ -1035,7 +1035,6 @@ char *janus_sip_sdp_manipulate(janus_sip_session *session, janus_sdp *sdp, gbool
 /* Media */
 static int janus_sip_allocate_local_ports(janus_sip_session *session);
 static void *janus_sip_relay_thread(void *data);
-static void janus_sip_media_cleanup(janus_sip_session *session);
 
 
 /* URI parsing utilies */
@@ -1226,7 +1225,7 @@ int janus_sip_init(janus_callbacks *callback, const char *config_path) {
 			struct ifaddrs *ifas = NULL;
 			janus_network_address iface;
 			janus_network_address_string_buffer ibuf;
-			if(getifaddrs(&ifas) == -1) {
+			if(getifaddrs(&ifas) || ifas == NULL) {
 				JANUS_LOG(LOG_ERR, "Unable to acquire list of network devices/interfaces; some configurations may not work as expected...\n");
 			} else {
 				if(janus_network_lookup_interface(ifas, item->value, &iface) != 0) {
@@ -1238,7 +1237,6 @@ int janus_sip_init(janus_callbacks *callback, const char *config_path) {
 						local_ip = g_strdup(janus_network_address_string_from_buffer(&ibuf));
 					}
 				}
-				freeifaddrs(ifas);
 			}
 		}
 
@@ -1260,7 +1258,7 @@ int janus_sip_init(janus_callbacks *callback, const char *config_path) {
 		if(item && item->value)
 			user_agent = g_strdup(item->value);
 		else
-			user_agent = g_strdup("Janus WebRTC Server SIP Plugin "JANUS_SIP_VERSION_STRING);
+			user_agent = g_strdup("Janus WebRTC Gateway SIP Plugin "JANUS_SIP_VERSION_STRING);
 		JANUS_LOG(LOG_VERB, "SIP User-Agent set to %s\n", user_agent);
 
 		item = janus_config_get_item_drilldown(config, "general", "rtp_port_range");
@@ -1322,7 +1320,7 @@ int janus_sip_init(janus_callbacks *callback, const char *config_path) {
 	identities = g_hash_table_new(g_str_hash, g_str_equal);
 	callids = g_hash_table_new(g_str_hash, g_str_equal);
 	messages = g_async_queue_new_full((GDestroyNotify) janus_sip_message_free);
-	/* This is the callback we'll need to invoke to contact the Janus core */
+	/* This is the callback we'll need to invoke to contact the gateway */
 	gateway = callback;
 
 	g_atomic_int_set(&initialized, 1);
@@ -1740,7 +1738,7 @@ void janus_sip_incoming_rtcp(janus_plugin_session *handle, int video, char *buf,
 		/* Forward to our SIP peer */
 		if(video) {
 			if(session->media.has_video && session->media.video_rtcp_fd != -1) {
-				/* Fix SSRCs as the Janus core does */
+				/* Fix SSRCs as the gateway does */
 				JANUS_LOG(LOG_HUGE, "[SIP] Fixing SSRCs (local %u, peer %u)\n",
 					session->media.video_ssrc, session->media.video_ssrc_peer);
 				janus_rtcp_fix_ssrc(NULL, (char *)buf, len, 1, session->media.video_ssrc, session->media.video_ssrc_peer);
@@ -1770,7 +1768,7 @@ void janus_sip_incoming_rtcp(janus_plugin_session *handle, int video, char *buf,
 			}
 		} else {
 			if(session->media.has_audio && session->media.audio_rtcp_fd != -1) {
-				/* Fix SSRCs as the Janus core does */
+				/* Fix SSRCs as the gateway does */
 				JANUS_LOG(LOG_HUGE, "[SIP] Fixing SSRCs (local %u, peer %u)\n",
 					session->media.audio_ssrc, session->media.audio_ssrc_peer);
 				janus_rtcp_fix_ssrc(NULL, (char *)buf, len, 1, session->media.audio_ssrc, session->media.audio_ssrc_peer);
@@ -1859,10 +1857,6 @@ static void janus_sip_hangup_media_internal(janus_plugin_session *handle) {
 		 session->status == janus_sip_call_status_incall))
 		g_atomic_int_set(&session->hangingup, 0);
 		return;
-	/* Do cleanup if media thread has not been created */
-	if(!session->media.ready) {
-		janus_sip_media_cleanup(session);
-	}
 	/* Get rid of the recorders, if available */
 	janus_mutex_lock(&session->rec_mutex);
 	janus_sip_recorder_close(session, TRUE, TRUE, TRUE, TRUE);
@@ -2694,7 +2688,6 @@ static void *janus_sip_handler(void *data) {
 			nua_respond(session->stack->s_nh_i,
 				200, sip_status_phrase(200),
 				SOATAG_USER_SDP_STR(sdp),
-				SOATAG_RTP_SELECT(SOA_RTP_SELECT_COMMON),
 				NUTAG_AUTOANSWER(0),
 				TAG_END());
 			g_free(sdp);
@@ -3282,7 +3275,7 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			 * http://sofia-sip.sourceforge.net/refdocs/nua/nua__tag_8h.html#a516dc237722dc8ca4f4aa3524b2b444b
 			 */
 			if(callstate == nua_callstate_proceeding &&
-					(session->stack->s_nh_i == nh || session->stack->s_nh_i == NULL)) {
+				    (session->stack->s_nh_i == nh || session->stack->s_nh_i == NULL)) {
 				json_t *call = json_object();
 				json_object_set_new(call, "sip", json_string("event"));
 				json_t *calling = json_object();
@@ -4304,42 +4297,6 @@ static void janus_sip_connect_sockets(janus_sip_session *session, struct sockadd
 
 }
 
-static void janus_sip_media_cleanup(janus_sip_session *session) {
-	if(session->media.audio_rtp_fd != -1) {
-		close(session->media.audio_rtp_fd);
-		session->media.audio_rtp_fd = -1;
-	}
-	if(session->media.audio_rtcp_fd != -1) {
-		close(session->media.audio_rtcp_fd);
-		session->media.audio_rtcp_fd = -1;
-	}
-	session->media.local_audio_rtp_port = 0;
-	session->media.local_audio_rtcp_port = 0;
-	session->media.audio_ssrc = 0;
-	if(session->media.video_rtp_fd != -1) {
-		close(session->media.video_rtp_fd);
-		session->media.video_rtp_fd = -1;
-	}
-	if(session->media.video_rtcp_fd != -1) {
-		close(session->media.video_rtcp_fd);
-		session->media.video_rtcp_fd = -1;
-	}
-	session->media.local_video_rtp_port = 0;
-	session->media.local_video_rtcp_port = 0;
-	session->media.video_ssrc = 0;
-	session->media.simulcast_ssrc = 0;
-	if(session->media.pipefd[0] > 0) {
-		close(session->media.pipefd[0]);
-		session->media.pipefd[0] = -1;
-	}
-	if(session->media.pipefd[1] > 0) {
-		close(session->media.pipefd[1]);
-		session->media.pipefd[1] = -1;
-	}
-	/* Clean up SRTP stuff, if needed */
-	janus_sip_srtp_cleanup(session);
-}
-
 /* Thread to relay RTP/RTCP frames coming from the SIP peer */
 static void *janus_sip_relay_thread(void *data) {
 	janus_sip_session *session = (janus_sip_session *)data;
@@ -4641,8 +4598,39 @@ static void *janus_sip_relay_thread(void *data) {
 			}
 		}
 	}
-	/* Cleanup the media session */
-	janus_sip_media_cleanup(session);
+	if(session->media.audio_rtp_fd != -1) {
+		close(session->media.audio_rtp_fd);
+		session->media.audio_rtp_fd = -1;
+	}
+	if(session->media.audio_rtcp_fd != -1) {
+		close(session->media.audio_rtcp_fd);
+		session->media.audio_rtcp_fd = -1;
+	}
+	session->media.local_audio_rtp_port = 0;
+	session->media.local_audio_rtcp_port = 0;
+	session->media.audio_ssrc = 0;
+	if(session->media.video_rtp_fd != -1) {
+		close(session->media.video_rtp_fd);
+		session->media.video_rtp_fd = -1;
+	}
+	if(session->media.video_rtcp_fd != -1) {
+		close(session->media.video_rtcp_fd);
+		session->media.video_rtcp_fd = -1;
+	}
+	session->media.local_video_rtp_port = 0;
+	session->media.local_video_rtcp_port = 0;
+	session->media.video_ssrc = 0;
+	session->media.simulcast_ssrc = 0;
+	if(session->media.pipefd[0] > 0) {
+		close(session->media.pipefd[0]);
+		session->media.pipefd[0] = -1;
+	}
+	if(session->media.pipefd[1] > 0) {
+		close(session->media.pipefd[1]);
+		session->media.pipefd[1] = -1;
+	}
+	/* Clean up SRTP stuff, if needed */
+	janus_sip_srtp_cleanup(session);
 	/* Done */
 	JANUS_LOG(LOG_VERB, "Leaving SIP relay thread\n");
 	janus_refcount_decrease(&session->ref);

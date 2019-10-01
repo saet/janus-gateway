@@ -91,7 +91,7 @@
 /* Plugin information */
 #define JANUS_SIPRE_VERSION			1
 #define JANUS_SIPRE_VERSION_STRING	"0.0.1"
-#define JANUS_SIPRE_DESCRIPTION		"This is a simple SIP plugin for Janus (based on libre instead of Sofia), allowing WebRTC peers to register at a SIP server and call SIP user agents through a Janus instance."
+#define JANUS_SIPRE_DESCRIPTION		"This is a simple SIP plugin for Janus (based on libre instead of Sofia), allowing WebRTC peers to register at a SIP server and call SIP user agents through the gateway."
 #define JANUS_SIPRE_NAME			"JANUS SIPre plugin"
 #define JANUS_SIPRE_AUTHOR			"Meetecho s.r.l."
 #define JANUS_SIPRE_PACKAGE			"janus.plugin.sipre"
@@ -904,7 +904,6 @@ char *janus_sipre_sdp_manipulate(janus_sipre_session *session, janus_sdp *sdp, g
 /* Media */
 static int janus_sipre_allocate_local_ports(janus_sipre_session *session);
 static void *janus_sipre_relay_thread(void *data);
-static void janus_sipre_media_cleanup(janus_sipre_session *session);
 
 
 /* Error codes */
@@ -983,7 +982,7 @@ int janus_sipre_init(janus_callbacks *callback, const char *config_path) {
 			struct ifaddrs *ifas = NULL;
 			janus_network_address iface;
 			janus_network_address_string_buffer ibuf;
-			if(getifaddrs(&ifas) == -1) {
+			if(getifaddrs(&ifas) || ifas == NULL) {
 				JANUS_LOG(LOG_ERR, "Unable to acquire list of network devices/interfaces; some configurations may not work as expected...\n");
 			} else {
 				if(janus_network_lookup_interface(ifas, item->value, &iface) != 0) {
@@ -995,7 +994,6 @@ int janus_sipre_init(janus_callbacks *callback, const char *config_path) {
 						local_ip = g_strdup(janus_network_address_string_from_buffer(&ibuf));
 					}
 				}
-				freeifaddrs(ifas);
 			}
 		}
 
@@ -1018,7 +1016,7 @@ int janus_sipre_init(janus_callbacks *callback, const char *config_path) {
 		if(item && item->value) {
 			user_agent = g_strdup(item->value);
 		} else {
-			user_agent = g_strdup("Janus WebRTC Server SIPre Plugin "JANUS_SIPRE_VERSION_STRING);
+			user_agent = g_strdup("Janus WebRTC Gateway SIPre Plugin "JANUS_SIPRE_VERSION_STRING);
 		}
 		JANUS_LOG(LOG_VERB, "SIPre User-Agent set to %s\n", user_agent);
 
@@ -1075,7 +1073,7 @@ int janus_sipre_init(janus_callbacks *callback, const char *config_path) {
 	identities = g_hash_table_new(g_str_hash, g_str_equal);
 	janus_mutex_init(&sessions_mutex);
 	messages = g_async_queue_new_full((GDestroyNotify) janus_sipre_message_free);
-	/* This is the callback we'll need to invoke to contact the Janus core */
+	/* This is the callback we'll need to invoke to contact the gateway */
 	gateway = callback;
 
 	g_atomic_int_set(&initialized, 1);
@@ -1468,7 +1466,7 @@ void janus_sipre_incoming_rtcp(janus_plugin_session *handle, int video, char *bu
 		/* Forward to our SIPre peer */
 		if((video && session->media.has_video && session->media.video_rtcp_fd != -1) ||
 				(!video && session->media.has_audio && session->media.audio_rtcp_fd != -1)) {
-			/* Fix SSRCs as the Janus core does */
+			/* Fix SSRCs as the gateway does */
 			JANUS_LOG(LOG_HUGE, "[SIPre-%s] Fixing %s SSRCs (local %u, peer %u)\n",
 				session->account.username ? session->account.username : "unknown",
 				video ? "video" : "audio",
@@ -1571,10 +1569,6 @@ static void janus_sipre_hangup_media_internal(janus_plugin_session *handle) {
 	session->status = janus_sipre_call_status_closing;
 	/* Enqueue the BYE */
 	mqueue_push(mq, janus_sipre_mqueue_event_do_bye, janus_sipre_mqueue_payload_create(session, NULL, 0, NULL));
-	/* Do cleanup if media thread has not been created */
-	if(!session->media.ready) {
-		janus_sipre_media_cleanup(session);
-	}
 	/* Get rid of the recorders, if available */
 	janus_mutex_lock(&session->rec_mutex);
 	janus_sipre_recorder_close(session, TRUE, TRUE, TRUE, TRUE);
@@ -3143,41 +3137,6 @@ static void janus_sipre_connect_sockets(janus_sipre_session *session, struct soc
 
 }
 
-static void janus_sipre_media_cleanup(janus_sipre_session *session) {
-	if(session->media.audio_rtp_fd != -1) {
-		close(session->media.audio_rtp_fd);
-		session->media.audio_rtp_fd = -1;
-	}
-	if(session->media.audio_rtcp_fd != -1) {
-		close(session->media.audio_rtcp_fd);
-		session->media.audio_rtcp_fd = -1;
-	}
-	session->media.local_audio_rtp_port = 0;
-	session->media.local_audio_rtcp_port = 0;
-	session->media.audio_ssrc = 0;
-	if(session->media.video_rtp_fd != -1) {
-		close(session->media.video_rtp_fd);
-		session->media.video_rtp_fd = -1;
-	}
-	if(session->media.video_rtcp_fd != -1) {
-		close(session->media.video_rtcp_fd);
-		session->media.video_rtcp_fd = -1;
-	}
-	session->media.local_video_rtp_port = 0;
-	session->media.local_video_rtcp_port = 0;
-	session->media.video_ssrc = 0;
-	if(session->media.pipefd[0] > 0) {
-		close(session->media.pipefd[0]);
-		session->media.pipefd[0] = -1;
-	}
-	if(session->media.pipefd[1] > 0) {
-		close(session->media.pipefd[1]);
-		session->media.pipefd[1] = -1;
-	}
-	/* Clean up SRTP stuff, if needed */
-	janus_sipre_srtp_cleanup(session);
-}
-
 /* Thread to relay RTP/RTCP frames coming from the SIPre peer */
 static void *janus_sipre_relay_thread(void *data) {
 	janus_sipre_session *session = (janus_sipre_session *)data;
@@ -3435,8 +3394,38 @@ static void *janus_sipre_relay_thread(void *data) {
 			}
 		}
 	}
-	/* Cleanup the media session */
-	janus_sipre_media_cleanup(session);
+	if(session->media.audio_rtp_fd != -1) {
+		close(session->media.audio_rtp_fd);
+		session->media.audio_rtp_fd = -1;
+	}
+	if(session->media.audio_rtcp_fd != -1) {
+		close(session->media.audio_rtcp_fd);
+		session->media.audio_rtcp_fd = -1;
+	}
+	session->media.local_audio_rtp_port = 0;
+	session->media.local_audio_rtcp_port = 0;
+	session->media.audio_ssrc = 0;
+	if(session->media.video_rtp_fd != -1) {
+		close(session->media.video_rtp_fd);
+		session->media.video_rtp_fd = -1;
+	}
+	if(session->media.video_rtcp_fd != -1) {
+		close(session->media.video_rtcp_fd);
+		session->media.video_rtcp_fd = -1;
+	}
+	session->media.local_video_rtp_port = 0;
+	session->media.local_video_rtcp_port = 0;
+	session->media.video_ssrc = 0;
+	if(session->media.pipefd[0] > 0) {
+		close(session->media.pipefd[0]);
+		session->media.pipefd[0] = -1;
+	}
+	if(session->media.pipefd[1] > 0) {
+		close(session->media.pipefd[1]);
+		session->media.pipefd[1] = -1;
+	}
+	/* Clean up SRTP stuff, if needed */
+	janus_sipre_srtp_cleanup(session);
 	/* Done */
 	JANUS_LOG(LOG_VERB, "Leaving SIPre relay thread\n");
 	janus_refcount_decrease(&session->ref);

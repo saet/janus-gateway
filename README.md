@@ -21,7 +21,7 @@ on [github](https://github.com/meetecho/janus-gateway/issues) instead.
 To install it, you'll need to satisfy the following dependencies:
 
 * [Jansson](http://www.digip.org/jansson/)
-* [libnice](http://nice.freedesktop.org/wiki/) (at least v0.1.13 suggested, master recommended)
+* [libnice](http://nice.freedesktop.org/wiki/)
 * [OpenSSL](http://www.openssl.org/) (at least v1.0.1e)
 * [libsrtp](https://github.com/cisco/libsrtp) (at least v1.5 suggested)
 * [usrsctp](https://github.com/sctplab/usrsctp) (only needed if you
@@ -33,9 +33,9 @@ you are interested in WebSockets support for the Janus API)
 * [cmake](http://www.cmake.org/) (only needed if you are interested in
 WebSockets and/or BoringSSL support, as they make use of it)
 * [rabbitmq-c](https://github.com/alanxz/rabbitmq-c) (only needed if
-you are interested in RabbitMQ support for the Janus API or events)
+you are interested in RabbitMQ support for the Janus API)
 * [paho.mqtt.c](https://eclipse.org/paho/clients/c) (only needed if
-you are interested in MQTT support for the Janus API or events)
+you are interested in MQTT support for the Janus API)
 * [nanomsg](https://nanomsg.org/) (only needed if
 you are interested in Nanomsg support for the Janus API)
 * [libcurl](https://curl.haxx.se/libcurl/) (only needed if you are
@@ -80,16 +80,10 @@ On Ubuntu or Debian, it would require something like this:
 on Ubuntu or Debian, unless you're using a recent version (e.g., Ubuntu
 14.04 LTS). In that case, you'll have to [install it manually](http://www.opus-codec.org).
 
-* *Note:* We always recommend the master version of libnice (or even the
-experimental patch that optimize its performances), or at the very least
-version 0.1.13, which should be available out of the box on most distros.
-If you're on an older version, consider upgrading it manually as they're
-known to cause trouble. Ideally, you'll want to remove the distro version
-and install the newer one manually. In case you want to keep both for
-some reason, for custom installations of libnice, you can run
-`pkg-config --cflags --libs nice` to make sure Janus can find the right
-installation. If that fails, you may need to set the `PKG_CONFIG_PATH`
-environment variable prior to compiling Janus, e.g.,
+* *Note:* For custom installations of libnice, you can run
+`pkg-config --cflags --libs nice` to make sure Janus can find the
+installation. If not, you may need to set the `PKG_CONFIG_PATH`
+environment variable prior to compiling Janus, eg.
 `export PKG_CONFIG_PATH=/path/to/libnice/lib/pkgconfig`
 
 In case you're interested in compiling the sample Event Handler plugin,
@@ -193,9 +187,9 @@ the first line with this:
 
 The same applies for Eclipse Paho MQTT C client library, which is needed
 for the optional MQTT support. If you're interested in integrating MQTT
-channels as an alternative (or replacement) to HTTP and/or WebSockets
-to control Janus, or as a carrier of Janus Events, you can install the
-latest version with the following steps:
+queues as an alternative (or replacement) to HTTP and/or WebSockets
+to control Janus, you can install the latest version with the
+following steps:
 
 	git clone https://github.com/eclipse/paho.mqtt.c.git
 	cd paho.mqtt.c
@@ -231,7 +225,7 @@ following steps:
 * *Note:* you may need to pass `--libdir=/usr/lib64` to the configure
 script if you're installing on a x86_64 distribution.
 
-To conclude, should you be interested in building the Janus
+To conclude, should you be interested in building the gateway
 documentation as well, you'll need some additional tools too:
 
 * [Doxygen](http://www.doxygen.org)
@@ -322,7 +316,7 @@ when configuring Janus as well, e.g.:
 Everything else works exactly the same way as on Linux.
 
 ## Configure and start
-To start the server, you can use the `janus` executable. There are several
+To start the gateway, you can use the janus executable. There are several
 things you can configure, either in a configuration file:
 
 	<installdir>/etc/janus/janus.cfg
@@ -331,7 +325,7 @@ or on the command line:
 
 	<installdir>/bin/janus --help
 
-	janus 0.4.4
+	janus 0.4.3
 
 	Usage: janus [OPTIONS]...
 
@@ -351,7 +345,7 @@ or on the command line:
 	-k, --cert-key=filename       DTLS certificate key
 	-K, --cert-pwd=text           DTLS certificate key passphrase (if needed)
 	-S, --stun-server=filename    STUN server(:port) to use, if needed (e.g.,
-								  Janus behind NAT, default=none)
+								  gateway behind NAT, default=none)
 	-1, --nat-1-1=ip              Public IP to put in all host candidates,
                                   assuming a 1:1 NAT is in place (e.g., Amazon
                                   EC2 instances, default=none)
@@ -405,11 +399,11 @@ or on the command line:
 	-e, --event-handlers          Enable event handlers  (default=off)
 
 Options passed through the command line have the precedence on those
-specified in the configuration file. To start the server, simply run:
+specified in the configuration file. To start the gateway, simply run:
 
 	<installdir>/bin/janus
 
-This will start the server, and have it look at the configuration file.
+This will start the gateway, and have it look at the configuration file.
 
 Make sure you have a look at all of the configuration files, to tailor
 Janus to your specific needs: each configuration file is documented, so

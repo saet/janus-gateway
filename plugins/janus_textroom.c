@@ -474,7 +474,7 @@ void janus_textroom_setup_media(janus_plugin_session *handle);
 void janus_textroom_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_textroom_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_textroom_incoming_data(janus_plugin_session *handle, char *buf, int len);
-void janus_textroom_slow_link(janus_plugin_session *handle, int uplink, int video);
+void janus_textroom_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks);
 void janus_textroom_hangup_media(janus_plugin_session *handle);
 void janus_textroom_destroy_session(janus_plugin_session *handle, int *error);
 json_t *janus_textroom_query_session(janus_plugin_session *handle);
@@ -780,7 +780,7 @@ int janus_textroom_init(janus_callbacks *callback, const char *config_path) {
 	rooms = g_hash_table_new_full(g_int64_hash, g_int64_equal, (GDestroyNotify)g_free, (GDestroyNotify)janus_textroom_room_destroy);
 	sessions = g_hash_table_new_full(NULL, NULL, NULL, (GDestroyNotify)janus_textroom_session_destroy);
 	messages = g_async_queue_new_full((GDestroyNotify) janus_textroom_message_free);
-	/* This is the callback we'll need to invoke to contact the Janus core */
+	/* This is the callback we'll need to invoke to contact the gateway */
 	gateway = callback;
 
 	/* Parse configuration to populate the rooms list */
@@ -2241,7 +2241,7 @@ msg_response:
 	return NULL;
 }
 
-void janus_textroom_slow_link(janus_plugin_session *handle, int uplink, int video) {
+void janus_textroom_slow_link(janus_plugin_session *handle, int uplink, int video, int nacks) {
 	/* We don't do audio/video */
 }
 
@@ -2400,7 +2400,7 @@ static void *janus_textroom_handler(void *data) {
 			json_t *jsep = json_pack("{ssss}", "type", "offer", "sdp", sdp);
 			if(sdp_update)
 				json_object_set_new(jsep, "restart", json_true());
-			/* How long will the Janus core take to push the event? */
+			/* How long will the gateway take to push the event? */
 			g_atomic_int_set(&session->hangingup, 0);
 			gint64 start = janus_get_monotonic_time();
 			int res = gateway->push_event(msg->handle, &janus_textroom_plugin, msg->transaction, event, jsep);

@@ -23,12 +23,12 @@
 // 		var server = "ws://" + window.location.hostname + ":8188";
 //
 // Of course this assumes that support for WebSockets has been built in
-// when compiling the server. WebSockets support has not been tested
+// when compiling the gateway. WebSockets support has not been tested
 // as much as the REST API, so handle with care!
 //
 //
 // If you have multiple options available, and want to let the library
-// autodetect the best way to contact your server (or pool of servers),
+// autodetect the best way to contact your gateway (or pool of gateways),
 // you can also pass an array of servers, e.g., to provide alternative
 // means of access (e.g., try WebSockets first and, if that fails, fall
 // back to plain HTTP) or just have failover servers:
@@ -61,8 +61,6 @@ var playing = false;
 var recordingId = null;
 var selectedRecording = null;
 var selectedRecordingInfo = null;
-
-var doSimulcast = (getQueryStringValue("simulcast") === "yes" || getQueryStringValue("simulcast") === "true");
 
 
 $(document).ready(function() {
@@ -421,11 +419,7 @@ function startRecording() {
 		
 		recordplay.createOffer(
 			{
-				// By default, it's sendrecv for audio and video... no datachannels
-				// If you want to test simulcasting (Chrome and Firefox only), then
-				// pass a ?simulcast=true when opening this demo page: it will turn
-				// the following 'simulcast' property to pass to janus.js to true
-				simulcast: doSimulcast,
+				// By default, it's sendrecv for audio and video...
 				success: function(jsep) {
 					Janus.debug("Got SDP!");
 					Janus.debug(jsep);
@@ -466,12 +460,4 @@ function stop() {
 	var stop = { "request": "stop" };
 	recordplay.send({"message": stop});
 	recordplay.hangup();
-}
-
-// Helper to parse query string
-function getQueryStringValue(name) {
-	name = name.replace(/[\[]/, "\\[").replace(/[\]]/, "\\]");
-	var regex = new RegExp("[\\?&]" + name + "=([^&#]*)"),
-		results = regex.exec(location.search);
-	return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
 }

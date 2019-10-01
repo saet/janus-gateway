@@ -42,7 +42,7 @@
  * (via the NoSIP plugin) is only responsible for bridging the media. This
  * might be more appropriate than the SIP plugin in cases where developers
  * want to keep control on the signalling layer, while still involving a
- * server of sorts. Of course, SIP is just an example here: other signalling
+ * gateway of sorts. Of course, SIP is just an example here: other signalling
  * protocols may be involved as well (e.g., IAX, XMPP, others). The NoSIP
  * plugin, though, will generate and expect plain SDP, so you'll need to
  * take care of any adaptation that may be needed to make this work with
@@ -263,11 +263,8 @@ static gboolean notify_events = TRUE;
 static janus_callbacks *gateway = NULL;
 
 static char *local_ip = NULL;
-#define DEFAULT_RTP_RANGE_MIN 10000
-#define DEFAULT_RTP_RANGE_MAX 60000
-static uint16_t rtp_range_min = DEFAULT_RTP_RANGE_MIN;
-static uint16_t rtp_range_max = DEFAULT_RTP_RANGE_MAX;
-static uint16_t rtp_range_slider = DEFAULT_RTP_RANGE_MIN;
+static uint16_t rtp_range_min = 10000;
+static uint16_t rtp_range_max = 60000;
 
 static GThread *handler_thread;
 static void *janus_nosip_handler(void *data);
@@ -584,9 +581,8 @@ static void janus_nosip_srtp_cleanup(janus_nosip_session *session) {
 void janus_nosip_sdp_process(janus_nosip_session *session, janus_sdp *sdp, gboolean answer, gboolean update, gboolean *changed);
 char *janus_nosip_sdp_manipulate(janus_nosip_session *session, janus_sdp *sdp, gboolean answer);
 /* Media */
-static int janus_nosip_allocate_local_ports(janus_nosip_session *session, gboolean update);
+static int janus_nosip_allocate_local_ports(janus_nosip_session *session);
 static void *janus_nosip_relay_thread(void *data);
-static void janus_nosip_media_cleanup(janus_nosip_session *session);
 
 
 /* Error codes */
@@ -629,7 +625,7 @@ int janus_nosip_init(janus_callbacks *callback, const char *config_path) {
 			struct ifaddrs *ifas = NULL;
 			janus_network_address iface;
 			janus_network_address_string_buffer ibuf;
-			if(getifaddrs(&ifas) == -1) {
+			if(getifaddrs(&ifas) || ifas == NULL) {
 				JANUS_LOG(LOG_ERR, "Unable to acquire list of network devices/interfaces; some configurations may not work as expected...\n");
 			} else {
 				if(janus_network_lookup_interface(ifas, item->value, &iface) != 0) {
@@ -641,7 +637,6 @@ int janus_nosip_init(janus_callbacks *callback, const char *config_path) {
 						local_ip = g_strdup(janus_network_address_string_from_buffer(&ibuf));
 					}
 				}
-				freeifaddrs(ifas);
 			}
 		}
 
@@ -662,17 +657,8 @@ int janus_nosip_init(janus_callbacks *callback, const char *config_path) {
 				rtp_range_min = rtp_range_max;
 				rtp_range_max = temp_port;
 			}
-			if(rtp_range_min % 2)
-				rtp_range_min++;	/* Pick an even port for RTP */
-			if(rtp_range_min > rtp_range_max) {
-				JANUS_LOG(LOG_WARN, "Incorrect port range (%u -- %u), switching min and max\n", rtp_range_min, rtp_range_max);
-				uint16_t range_temp = rtp_range_max;
-				rtp_range_max = rtp_range_min;
-				rtp_range_min = range_temp;
-			}
 			if(rtp_range_max == 0)
 				rtp_range_max = 65535;
-			rtp_range_slider = rtp_range_min;
 			JANUS_LOG(LOG_VERB, "NoSIP RTP/RTCP port range: %u -- %u\n", rtp_range_min, rtp_range_max);
 		}
 
@@ -703,7 +689,7 @@ int janus_nosip_init(janus_callbacks *callback, const char *config_path) {
 
 	sessions = g_hash_table_new_full(NULL, NULL, NULL, (GDestroyNotify)janus_nosip_session_destroy);
 	messages = g_async_queue_new_full((GDestroyNotify) janus_nosip_message_free);
-	/* This is the callback we'll need to invoke to contact the Janus core */
+	/* This is the callback we'll need to invoke to contact the gateway */
 	gateway = callback;
 
 	g_atomic_int_set(&initialized, 1);
@@ -1023,7 +1009,7 @@ void janus_nosip_incoming_rtcp(janus_plugin_session *handle, int video, char *bu
 		/* Forward to our NoSIP peer */
 		if((video && session->media.has_video && session->media.video_rtcp_fd != -1) ||
 				(!video && session->media.has_audio && session->media.audio_rtcp_fd != -1)) {
-			/* Fix SSRCs as the Janus core does */
+			/* Fix SSRCs as the gateway does */
 			JANUS_LOG(LOG_HUGE, "[NoSIP-%p] Fixing %s SSRCs (local %u, peer %u)\n",
 				session, video ? "video" : "audio",
 				(video ? session->media.video_ssrc : session->media.audio_ssrc),
@@ -1120,10 +1106,6 @@ static void janus_nosip_hangup_media_internal(janus_plugin_session *handle) {
 			res = write(session->media.pipefd[1], &code, sizeof(int));
 		} while(res == -1 && errno == EINTR);
 	}
-	/* Do cleanup if media thread has not been created */
-	if(!session->media.ready) {
-		janus_nosip_media_cleanup(session);
-	}
 	/* Get rid of the recorders, if available */
 	janus_mutex_lock(&session->rec_mutex);
 	janus_nosip_recorder_close(session, TRUE, TRUE, TRUE, TRUE);
@@ -1204,9 +1186,6 @@ static void *janus_nosip_handler(void *data) {
 			const char *msg_sdp_type = json_string_value(json_object_get(generate ? msg->jsep : root, "type"));
 			const char *msg_sdp = json_string_value(json_object_get(generate ? msg->jsep : root, "sdp"));
 			gboolean sdp_update = json_is_true(json_object_get(generate ? msg->jsep : root, "update"));
-			if(!generate && session->media.ready) {
-				sdp_update = TRUE;
-			}
 			if(!msg_sdp) {
 				JANUS_LOG(LOG_ERR, "Missing SDP\n");
 				error_code = JANUS_NOSIP_ERROR_MISSING_SDP;
@@ -1304,23 +1283,24 @@ static void *janus_nosip_handler(void *data) {
 				goto error;
 			}
 			if(generate) {
-				/* Allocate RTP ports and merge them with the anonymized SDP */
-				if(strstr(msg_sdp, "m=audio") && !strstr(msg_sdp, "m=audio 0")) {
-					JANUS_LOG(LOG_VERB, "Going to negotiate audio...\n");
-					session->media.has_audio = 1;	/* FIXME Maybe we need a better way to signal this */
+				if(!sdp_update) {
+					/* Allocate RTP ports and merge them with the anonymized SDP */
+					if(strstr(msg_sdp, "m=audio") && !strstr(msg_sdp, "m=audio 0")) {
+						JANUS_LOG(LOG_VERB, "Going to negotiate audio...\n");
+						session->media.has_audio = 1;	/* FIXME Maybe we need a better way to signal this */
+					}
+					if(strstr(msg_sdp, "m=video") && !strstr(msg_sdp, "m=video 0")) {
+						JANUS_LOG(LOG_VERB, "Going to negotiate video...\n");
+						session->media.has_video = 1;	/* FIXME Maybe we need a better way to signal this */
+					}
+					if(janus_nosip_allocate_local_ports(session) < 0) {
+						JANUS_LOG(LOG_ERR, "Could not allocate RTP/RTCP ports\n");
+						janus_sdp_destroy(parsed_sdp);
+						error_code = JANUS_NOSIP_ERROR_IO_ERROR;
+						g_snprintf(error_cause, 512, "Could not allocate RTP/RTCP ports");
+						goto error;
+					}
 				}
-				if(strstr(msg_sdp, "m=video") && !strstr(msg_sdp, "m=video 0")) {
-					JANUS_LOG(LOG_VERB, "Going to negotiate video...\n");
-					session->media.has_video = 1;	/* FIXME Maybe we need a better way to signal this */
-				}
-				if(janus_nosip_allocate_local_ports(session, sdp_update) < 0) {
-					JANUS_LOG(LOG_ERR, "Could not allocate RTP/RTCP ports\n");
-					janus_sdp_destroy(parsed_sdp);
-					error_code = JANUS_NOSIP_ERROR_IO_ERROR;
-					g_snprintf(error_cause, 512, "Could not allocate RTP/RTCP ports");
-					goto error;
-				}
-
 				char *sdp = janus_nosip_sdp_manipulate(session, parsed_sdp, FALSE);
 				if(sdp == NULL) {
 					JANUS_LOG(LOG_ERR, "Could not allocate RTP/RTCP ports\n");
@@ -1357,7 +1337,7 @@ static void *janus_nosip_handler(void *data) {
 					/* Clean up SRTP stuff from before first, in case it's still needed */
 					janus_nosip_srtp_cleanup(session);
 				}
-				janus_nosip_sdp_process(session, parsed_sdp, !offer, sdp_update, &changed);
+				janus_nosip_sdp_process(session, parsed_sdp, !offer, FALSE, &changed);
 				/* Check if offer has neither audio nor video, fail */
 				if(!session->media.has_audio && !session->media.has_video) {
 					JANUS_LOG(LOG_ERR, "No audio and no video being negotiated\n");
@@ -1778,175 +1758,145 @@ char *janus_nosip_sdp_manipulate(janus_nosip_session *session, janus_sdp *sdp, g
 	return janus_sdp_write(sdp);
 }
 
-static int janus_nosip_bind_socket(int fd, int port) {
-	struct sockaddr_in rtp_address;
-	rtp_address.sin_family = AF_INET;
-	rtp_address.sin_port = htons(port);
-	inet_pton(AF_INET, local_ip, &rtp_address.sin_addr.s_addr);
-	if(bind(fd, (struct sockaddr *)(&rtp_address), sizeof(struct sockaddr)) < 0) {
-		JANUS_LOG(LOG_ERR, "Bind failed (port %d)\n", port);
-		return -1;
-	}
-	return 0;
-}
-
-/* Bind RTP/RTCP port pair */
-static int janus_nosip_allocate_port_pair(int fds[2], int ports[2]) {
-	uint16_t rtp_port_next = rtp_range_slider; 					/* Read global slider */
-	uint16_t rtp_port_start = rtp_port_next;
-	gboolean rtp_port_wrap = FALSE;
-
-	int rtp_fd = -1, rtcp_fd = -1;
-	while(1) {
-		if(rtp_port_wrap && rtp_port_next >= rtp_port_start) {	/* Full range scanned */
-			JANUS_LOG(LOG_ERR, "No ports available for audio/video channel in range: %u -- %u\n",
-				  rtp_range_min, rtp_range_max);
-			break;
-		}
-		if(rtp_fd == -1) {
-			rtp_fd = socket(AF_INET, SOCK_DGRAM, 0);
-		}
-		if(rtcp_fd == -1) {
-			rtcp_fd = socket(AF_INET, SOCK_DGRAM, 0);
-		}
-		if(rtp_fd == -1 || rtcp_fd == -1) {
-			JANUS_LOG(LOG_ERR, "Error creating audio/video sockets...\n");
-			break;
-		}
-	 	int rtp_port = rtp_port_next;
-		int rtcp_port = rtp_port+1;
-		if((uint32_t)(rtp_port_next + 2UL) < rtp_range_max) {
-			/* Advance to next pair */
-			rtp_port_next += 2;
-		} else {
-			rtp_port_next = rtp_range_min;
-			rtp_port_wrap = TRUE;
-		}
-		if(janus_nosip_bind_socket(rtp_fd, rtp_port)) { 
-			/* rtp_fd still unbound, reuse it */
-		} else if(janus_nosip_bind_socket(rtcp_fd, rtcp_port)) {
-			close(rtp_fd);
-			rtp_fd = -1;
-			/* rtcp_fd still unbound, reuse it */
-		} else {
-			fds[0] = rtp_fd;
-			fds[1] = rtcp_fd;
-			ports[0] = rtp_port;
-			ports[1] = rtcp_port;
-			rtp_range_slider = rtp_port_next;		/* Write global slider */
-			return 0;
-		}
-	}
-	if(rtp_fd != -1) {
-		close(rtp_fd);
-	}
-	if(rtcp_fd != -1) {
-		close(rtcp_fd);
-	}
-	return -1;
-}
 /* Bind local RTP/RTCP sockets */
-static int janus_nosip_allocate_local_ports(janus_nosip_session *session, gboolean update) {
+static int janus_nosip_allocate_local_ports(janus_nosip_session *session) {
 	if(session == NULL) {
 		JANUS_LOG(LOG_ERR, "Invalid session\n");
 		return -1;
 	}
 	/* Reset status */
-	if(!update) {
-		if(session->media.audio_rtp_fd != -1) {
-			close(session->media.audio_rtp_fd);
-			session->media.audio_rtp_fd = -1;
-		}
-		if(session->media.audio_rtcp_fd != -1) {
-			close(session->media.audio_rtcp_fd);
-			session->media.audio_rtcp_fd = -1;
-		}
-		session->media.local_audio_rtp_port = 0;
-		session->media.local_audio_rtcp_port = 0;
-		session->media.audio_ssrc = 0;
-		if(session->media.video_rtp_fd != -1) {
-			close(session->media.video_rtp_fd);
-			session->media.video_rtp_fd = -1;
-		}
-		if(session->media.video_rtcp_fd != -1) {
-			close(session->media.video_rtcp_fd);
-			session->media.video_rtcp_fd = -1;
-		}
-		session->media.local_video_rtp_port = 0;
-		session->media.local_video_rtcp_port = 0;
-		session->media.video_ssrc = 0;
-		if(session->media.pipefd[0] > 0) {
-			close(session->media.pipefd[0]);
-			session->media.pipefd[0] = -1;
-		}
-		if(session->media.pipefd[1] > 0) {
-			close(session->media.pipefd[1]);
-			session->media.pipefd[1] = -1;
-		}
+	if(session->media.audio_rtp_fd != -1) {
+		close(session->media.audio_rtp_fd);
+		session->media.audio_rtp_fd = -1;
+	}
+	if(session->media.audio_rtcp_fd != -1) {
+		close(session->media.audio_rtcp_fd);
+		session->media.audio_rtcp_fd = -1;
+	}
+	session->media.local_audio_rtp_port = 0;
+	session->media.local_audio_rtcp_port = 0;
+	session->media.audio_ssrc = 0;
+	if(session->media.video_rtp_fd != -1) {
+		close(session->media.video_rtp_fd);
+		session->media.video_rtp_fd = -1;
+	}
+	if(session->media.video_rtcp_fd != -1) {
+		close(session->media.video_rtcp_fd);
+		session->media.video_rtcp_fd = -1;
+	}
+	session->media.local_video_rtp_port = 0;
+	session->media.local_video_rtcp_port = 0;
+	session->media.video_ssrc = 0;
+	if(session->media.pipefd[0] > 0) {
+		close(session->media.pipefd[0]);
+		session->media.pipefd[0] = -1;
+	}
+	if(session->media.pipefd[1] > 0) {
+		close(session->media.pipefd[1]);
+		session->media.pipefd[1] = -1;
 	}
 	/* Start */
-	if(session->media.has_audio && 
-			(session->media.local_audio_rtp_port == 0 || session->media.local_audio_rtcp_port == 0)) {
-		if(session->media.audio_rtp_fd != -1) {
-			JANUS_LOG(LOG_WARN, "Audio RTP unbound socket detected, closing ...\n");
-			close(session->media.audio_rtp_fd);
-			session->media.audio_rtp_fd = -1;
-		}
-		if(session->media.audio_rtcp_fd != -1) {
-			JANUS_LOG(LOG_WARN, "Audio RTCP unbound socket detected, closing ...\n");
-			close(session->media.audio_rtcp_fd);
-			session->media.audio_rtcp_fd = -1;
-		}
+	int attempts = 100;	/* FIXME Don't retry forever */
+	if(session->media.has_audio) {
 		JANUS_LOG(LOG_VERB, "Allocating audio ports:\n");
-		int fds[2], ports[2];
-		if(janus_nosip_allocate_port_pair(fds, ports)) {
-			return -1;
+		struct sockaddr_in audio_rtp_address, audio_rtcp_address;
+		while(session->media.local_audio_rtp_port == 0 || session->media.local_audio_rtcp_port == 0) {
+			if(attempts == 0)	/* Too many failures */
+				return -1;
+			if(session->media.audio_rtp_fd == -1) {
+				session->media.audio_rtp_fd = socket(AF_INET, SOCK_DGRAM, 0);
+			}
+			if(session->media.audio_rtcp_fd == -1) {
+				session->media.audio_rtcp_fd = socket(AF_INET, SOCK_DGRAM, 0);
+			}
+			if(session->media.audio_rtp_fd == -1 || session->media.audio_rtcp_fd == -1) {
+				JANUS_LOG(LOG_ERR, "Error creating audio sockets...\n");
+				return -1;
+			}
+			int rtp_port = g_random_int_range(rtp_range_min, rtp_range_max);
+			if(rtp_port % 2)
+				rtp_port++;	/* Pick an even port for RTP */
+			audio_rtp_address.sin_family = AF_INET;
+			audio_rtp_address.sin_port = htons(rtp_port);
+			inet_pton(AF_INET, local_ip, &audio_rtp_address.sin_addr.s_addr);
+			if(bind(session->media.audio_rtp_fd, (struct sockaddr *)(&audio_rtp_address), sizeof(struct sockaddr)) < 0) {
+				JANUS_LOG(LOG_ERR, "Bind failed for audio RTP (port %d), trying a different one...\n", rtp_port);
+				close(session->media.audio_rtp_fd);
+				session->media.audio_rtp_fd = -1;
+				attempts--;
+				continue;
+			}
+			JANUS_LOG(LOG_VERB, "Audio RTP listener bound to port %d\n", rtp_port);
+			int rtcp_port = rtp_port+1;
+			audio_rtcp_address.sin_family = AF_INET;
+			audio_rtcp_address.sin_port = htons(rtcp_port);
+			inet_pton(AF_INET, local_ip, &audio_rtcp_address.sin_addr.s_addr);
+			if(bind(session->media.audio_rtcp_fd, (struct sockaddr *)(&audio_rtcp_address), sizeof(struct sockaddr)) < 0) {
+				JANUS_LOG(LOG_ERR, "Bind failed for audio RTCP (port %d), trying a different one...\n", rtcp_port);
+				/* RTP socket is not valid anymore, reset it */
+				close(session->media.audio_rtp_fd);
+				session->media.audio_rtp_fd = -1;
+				close(session->media.audio_rtcp_fd);
+				session->media.audio_rtcp_fd = -1;
+				attempts--;
+				continue;
+			}
+			JANUS_LOG(LOG_VERB, "Audio RTCP listener bound to port %d\n", rtcp_port);
+			session->media.local_audio_rtp_port = rtp_port;
+			session->media.local_audio_rtcp_port = rtcp_port;
 		}
-		JANUS_LOG(LOG_VERB, "Audio RTP listener bound to port %d\n", ports[0]);
-		JANUS_LOG(LOG_VERB, "Audio RTCP listener bound to port %d\n", ports[1]);
-		session->media.audio_rtp_fd = fds[0];
-		session->media.audio_rtcp_fd = fds[1];
-		session->media.local_audio_rtp_port = ports[0];
-		session->media.local_audio_rtcp_port = ports[1];
 	}
-	if(session->media.has_video && 
-			(session->media.local_video_rtp_port == 0 || session->media.local_video_rtcp_port == 0)) {
-		if(session->media.video_rtp_fd != -1) {
-			JANUS_LOG(LOG_WARN, "Video RTP unbound socket detected, closing ...\n");
-			close(session->media.video_rtp_fd);
-			session->media.video_rtp_fd = -1;
-		}
-		if(session->media.video_rtcp_fd != -1) {
-			JANUS_LOG(LOG_WARN, "Video RTCP unbound socket detected, closing ...\n");
-			close(session->media.video_rtcp_fd);
-			session->media.video_rtcp_fd = -1;
-		}
+	if(session->media.has_video) {
 		JANUS_LOG(LOG_VERB, "Allocating video ports:\n");
-		int fds[2], ports[2];
-		if(janus_nosip_allocate_port_pair(fds, ports)) {
-			return -1;
+		struct sockaddr_in video_rtp_address, video_rtcp_address;
+		while(session->media.local_video_rtp_port == 0 || session->media.local_video_rtcp_port == 0) {
+			if(attempts == 0)	/* Too many failures */
+				return -1;
+			if(session->media.video_rtp_fd == -1) {
+				session->media.video_rtp_fd = socket(AF_INET, SOCK_DGRAM, 0);
+			}
+			if(session->media.video_rtcp_fd == -1) {
+				session->media.video_rtcp_fd = socket(AF_INET, SOCK_DGRAM, 0);
+			}
+			if(session->media.video_rtp_fd == -1 || session->media.video_rtcp_fd == -1) {
+				JANUS_LOG(LOG_ERR, "Error creating video sockets...\n");
+				return -1;
+			}
+			int rtp_port = g_random_int_range(rtp_range_min, rtp_range_max);
+			if(rtp_port % 2)
+				rtp_port++;	/* Pick an even port for RTP */
+			video_rtp_address.sin_family = AF_INET;
+			video_rtp_address.sin_port = htons(rtp_port);
+			inet_pton(AF_INET, local_ip, &video_rtp_address.sin_addr.s_addr);
+			if(bind(session->media.video_rtp_fd, (struct sockaddr *)(&video_rtp_address), sizeof(struct sockaddr)) < 0) {
+				JANUS_LOG(LOG_ERR, "Bind failed for video RTP (port %d), trying a different one...\n", rtp_port);
+				close(session->media.video_rtp_fd);
+				session->media.video_rtp_fd = -1;
+				attempts--;
+				continue;
+			}
+			JANUS_LOG(LOG_VERB, "Video RTP listener bound to port %d\n", rtp_port);
+			int rtcp_port = rtp_port+1;
+			video_rtcp_address.sin_family = AF_INET;
+			video_rtcp_address.sin_port = htons(rtcp_port);
+			inet_pton(AF_INET, local_ip, &video_rtcp_address.sin_addr.s_addr);
+			if(bind(session->media.video_rtcp_fd, (struct sockaddr *)(&video_rtcp_address), sizeof(struct sockaddr)) < 0) {
+				JANUS_LOG(LOG_ERR, "Bind failed for video RTCP (port %d), trying a different one...\n", rtcp_port);
+				/* RTP socket is not valid anymore, reset it */
+				close(session->media.video_rtp_fd);
+				session->media.video_rtp_fd = -1;
+				close(session->media.video_rtcp_fd);
+				session->media.video_rtcp_fd = -1;
+				attempts--;
+				continue;
+			}
+			JANUS_LOG(LOG_VERB, "Video RTCP listener bound to port %d\n", rtcp_port);
+			session->media.local_video_rtp_port = rtp_port;
+			session->media.local_video_rtcp_port = rtcp_port;
 		}
-		JANUS_LOG(LOG_VERB, "Video RTP listener bound to port %d\n", ports[0]);
-		JANUS_LOG(LOG_VERB, "Video RTCP listener bound to port %d\n", ports[1]);
-		session->media.video_rtp_fd = fds[0];
-		session->media.video_rtcp_fd = fds[1];
-		session->media.local_video_rtp_port = ports[0];
-		session->media.local_video_rtcp_port = ports[1];
 	}
 	/* We need this to quickly interrupt the poll when it's time to update a session or wrap up */
-	if(!update) {
-		pipe(session->media.pipefd);
-	} else {
-		/* Something changed: mark this on the session, so that the thread can update the sockets */
-		session->media.updated = TRUE;
-		if(session->media.pipefd[1] > 0) {
-			int code = 1;
-			ssize_t res = 0;
-			do {
-				res = write(session->media.pipefd[1], &code, sizeof(int));
-			} while(res == -1 && errno == EINTR);
-		}
-	}
+	pipe(session->media.pipefd);
 	return 0;
 }
 
@@ -1989,41 +1939,6 @@ static void janus_nosip_connect_sockets(janus_nosip_session *session, struct soc
 		}
 	}
 
-}
-
-static void janus_nosip_media_cleanup(janus_nosip_session *session) {
-	if(session->media.audio_rtp_fd != -1) {
-		close(session->media.audio_rtp_fd);
-		session->media.audio_rtp_fd = -1;
-	}
-	if(session->media.audio_rtcp_fd != -1) {
-		close(session->media.audio_rtcp_fd);
-		session->media.audio_rtcp_fd = -1;
-	}
-	session->media.local_audio_rtp_port = 0;
-	session->media.local_audio_rtcp_port = 0;
-	session->media.audio_ssrc = 0;
-	if(session->media.video_rtp_fd != -1) {
-		close(session->media.video_rtp_fd);
-		session->media.video_rtp_fd = -1;
-	}
-	if(session->media.video_rtcp_fd != -1) {
-		close(session->media.video_rtcp_fd);
-		session->media.video_rtcp_fd = -1;
-	}
-	session->media.local_video_rtp_port = 0;
-	session->media.local_video_rtcp_port = 0;
-	session->media.video_ssrc = 0;
-	if(session->media.pipefd[0] > 0) {
-		close(session->media.pipefd[0]);
-		session->media.pipefd[0] = -1;
-	}
-	if(session->media.pipefd[1] > 0) {
-		close(session->media.pipefd[1]);
-		session->media.pipefd[1] = -1;
-	}
-	/* Clean up SRTP stuff, if needed */
-	janus_nosip_srtp_cleanup(session);
 }
 
 /* Thread to relay RTP/RTCP frames coming from the peer */
@@ -2073,7 +1988,7 @@ static void *janus_nosip_relay_thread(void *data) {
 			!g_atomic_int_get(&session->destroyed) && !g_atomic_int_get(&session->hangingup)) {
 		if(session->media.updated) {
 			/* Apparently there was a session update */
-			if(have_server_ip && (inet_aton(session->media.remote_ip, &server_addr.sin_addr) != 0)) {
+			if(have_server_ip && (inet_aton(session->media.remote_ip, &server_addr.sin_addr) == 0)) {
 				janus_nosip_connect_sockets(session, &server_addr);
 			} else {
 				JANUS_LOG(LOG_ERR, "[NoSIP-%p] Couldn't update session details: missing or invalid remote IP address? (%s)\n",
@@ -2264,8 +2179,38 @@ static void *janus_nosip_relay_thread(void *data) {
 			}
 		}
 	}
-	/* Cleanup the media session */
-	janus_nosip_media_cleanup(session);
+	if(session->media.audio_rtp_fd != -1) {
+		close(session->media.audio_rtp_fd);
+		session->media.audio_rtp_fd = -1;
+	}
+	if(session->media.audio_rtcp_fd != -1) {
+		close(session->media.audio_rtcp_fd);
+		session->media.audio_rtcp_fd = -1;
+	}
+	session->media.local_audio_rtp_port = 0;
+	session->media.local_audio_rtcp_port = 0;
+	session->media.audio_ssrc = 0;
+	if(session->media.video_rtp_fd != -1) {
+		close(session->media.video_rtp_fd);
+		session->media.video_rtp_fd = -1;
+	}
+	if(session->media.video_rtcp_fd != -1) {
+		close(session->media.video_rtcp_fd);
+		session->media.video_rtcp_fd = -1;
+	}
+	session->media.local_video_rtp_port = 0;
+	session->media.local_video_rtcp_port = 0;
+	session->media.video_ssrc = 0;
+	if(session->media.pipefd[0] > 0) {
+		close(session->media.pipefd[0]);
+		session->media.pipefd[0] = -1;
+	}
+	if(session->media.pipefd[1] > 0) {
+		close(session->media.pipefd[1]);
+		session->media.pipefd[1] = -1;
+	}
+	/* Clean up SRTP stuff, if needed */
+	janus_nosip_srtp_cleanup(session);
 	/* Done */
 	JANUS_LOG(LOG_INFO, "Leaving NoSIP relay thread\n");
 	janus_refcount_decrease(&session->ref);

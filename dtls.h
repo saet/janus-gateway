@@ -4,7 +4,7 @@
  * \brief    DTLS/SRTP processing (headers)
  * \details  Implementation (based on OpenSSL and libsrtp) of the DTLS/SRTP
  * transport. The code takes care of the DTLS handshake between peers and
- * the server, and sets the proper SRTP and SRTCP context up accordingly.
+ * the gateway, and sets the proper SRTP and SRTCP context up accordingly.
  * A DTLS alert from a peer is notified to the plugin handling him/her
  * by means of the hangup_media callback.
  *
@@ -28,9 +28,8 @@
  * @param[in] server_pem Path to the certificate to use
  * @param[in] server_key Path to the key to use
  * @param[in] password Password needed to use the key, if any
- * @param[in] timeout DTLS timeout base to use for retransmissions (ignored if not using BoringSSL)
  * @returns 0 in case of success, a negative integer on errors */
-gint janus_dtls_srtp_init(const char *server_pem, const char *server_key, const char *password, guint timeout);
+gint janus_dtls_srtp_init(const char *server_pem, const char *server_key, const char *password);
 /*! \brief Method to cleanup DTLS stuff before exiting */
 void janus_dtls_srtp_cleanup(void);
 /*! \brief Method to return a string representation (SHA-256) of the certificate fingerprint */
@@ -56,7 +55,7 @@ typedef enum janus_dtls_state {
 typedef struct janus_dtls_srtp {
 	/*! \brief Opaque pointer to the component this DTLS-SRTP context belongs to */
 	void *component;
-	/*! \brief DTLS role of the server for this stream: 1=client, 0=server */
+	/*! \brief DTLS role of the gateway for this stream: 1=client, 0=server */
 	janus_dtls_role dtls_role;
 	/*! \brief DTLS state of this component: -1=failed, 0=nothing, 1=trying, 2=connected */
 	janus_dtls_state dtls_state;
