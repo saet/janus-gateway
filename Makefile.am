@@ -552,6 +552,35 @@ duktape_DATA += \
 EXTRA_DIST += conf/janus.plugin.duktape.jcfg.sample.in
 endif
 
+if ENABLE_PLUGIN_PTZ
+plugin_LTLIBRARIES += plugins/libjanus_ptz.la
+plugins_libjanus_ptz_la_SOURCES = plugins/janus_ptz.c
+plugins_libjanus_ptz_la_CFLAGS = $(plugins_cflags) $(LIBCURL_CFLAGS)
+plugins_libjanus_ptz_la_LDFLAGS = $(plugins_ldflags) $(LIBCURL_LDFLAGS) $(LIBCURL_LIBS)
+plugins_libjanus_ptz_la_LIBADD = $(plugins_libadd) $(LIBCURL_LIBADD)
+#conf_DATA += conf/janus.plugin.ptz.cfg.sample
+#EXTRA_DIST += conf/janus.plugin.ptz.cfg.sample
+endif
+
+if ENABLE_PLUGIN_VIDEOMUX
+plugin_LTLIBRARIES += plugins/libjanus_videomux.la
+plugins_libjanus_videomux_la_SOURCES = plugins/janus_videomux.c
+plugins_libjanus_videomux_la_CFLAGS = $(plugins_cflags) $(LIBCURL_CFLAGS)
+plugins_libjanus_videomux_la_LDFLAGS = $(plugins_ldflags) $(LIBCURL_LDFLAGS) $(LIBCURL_LIBS)
+plugins_libjanus_videomux_la_LIBADD = $(plugins_libadd)
+#conf_DATA += conf/janus.plugin.videomux.cfg.sample
+#EXTRA_DIST += conf/janus.plugin.videomux.cfg.sample
+endif
+
+if ENABLE_PLUGIN_FRAME
+plugin_LTLIBRARIES += plugins/libjanus_frame.la
+plugins_libjanus_frame_la_SOURCES = plugins/janus_frame.c
+plugins_libjanus_frame_la_CFLAGS = $(plugins_cflags) $(LIBCURL_CFLAGS)
+plugins_libjanus_frame_la_LDFLAGS = $(plugins_ldflags) $(LIBCURL_LDFLAGS) $(LIBCURL_LIBS)
+plugins_libjanus_frame_la_LIBADD = $(plugins_libadd) $(LIBCURL_LIBADD)
+#conf_DATA += conf/janus.plugin.frame.cfg.sample
+#EXTRA_DIST += conf/janus.plugin.frame.cfg.sample
+endif
 
 ##
 # Post-processing
