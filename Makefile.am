@@ -31,6 +31,9 @@ loggersheader_HEADERS = loggers/logger.h
 confdir = $(sysconfdir)/janus
 conf_DATA = conf/janus.jcfg.sample
 
+certdir = $(datadir)/janus/certs
+cert_DATA = certs/mycert.key certs/mycert.pem
+
 plugindir = $(libdir)/janus/plugins
 plugin_LTLIBRARIES = $(NULL)
 
@@ -68,6 +71,7 @@ jsmodules_DATA = html/janus.js
 	$(MKDIR_P) $(@D)
 	$(AM_V_GEN) sed -e "\
 	    s|[@]confdir[@]|$(confdir)|;\
+	    s|[@]certdir[@]|$(certdir)|;\
 	    s|[@]plugindir[@]|$(plugindir)|;\
 	    s|[@]transportdir[@]|$(transportdir)|;\
 	    s|[@]eventdir[@]|$(eventdir)|;\
