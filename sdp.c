@@ -16,10 +16,15 @@
  * \ref protocols
  */
 
+#include <netdb.h>
+
+#include <gio/gio.h>
+
 #include "janus.h"
 #include "ice.h"
 #include "sdp.h"
 #include "utils.h"
+#include "ip-utils.h"
 #include "debug.h"
 #include "events.h"
 
@@ -562,6 +567,51 @@ int janus_sdp_process(void *ice_handle, janus_sdp *remote_sdp, gboolean update) 
 	return 0;	/* FIXME Handle errors better */
 }
 
+typedef struct janus_sdp_mdns_candidate {
+	janus_ice_handle *handle;
+	char *candidate, *local;
+	GCancellable *cancellable;
+} janus_sdp_mdns_candidate;
+static void janus_sdp_mdns_resolved(GObject *source_object, GAsyncResult *res, gpointer user_data) {
+	/* This callback is invoked when the address is resolved */
+	janus_sdp_mdns_candidate *mc = (janus_sdp_mdns_candidate *)user_data;
+	GResolver *resolver = g_resolver_get_default();
+	GError *error = NULL;
+	GList *list = g_resolver_lookup_by_name_finish(resolver, res, &error);
+	if(mc == NULL) {
+		g_resolver_free_addresses(list);
+		g_object_unref(resolver);
+		return;
+	}
+	char *resolved = NULL;
+	if(error != NULL || list == NULL || list->data == NULL) {
+		JANUS_LOG(LOG_WARN, "[%"SCNu64"] Error resolving mDNS address (%s): %s\n",
+			mc->handle->handle_id, mc->local, error ? error->message : "no results");
+	} else {
+		resolved = g_inet_address_to_string((GInetAddress *)list->data);
+		JANUS_LOG(LOG_VERB, "[%"SCNu64"] mDNS address (%s) resolved: %s\n",
+			mc->handle->handle_id, mc->local, resolved);
+	}
+	g_resolver_free_addresses(list);
+	g_object_unref(resolver);
+	if(resolved != NULL && mc->handle->stream && mc->handle->app_handle &&
+			!g_atomic_int_get(&mc->handle->app_handle->stopped) &&
+			!g_atomic_int_get(&mc->handle->destroyed)) {
+		/* Replace the .local address with the resolved one in the candidate string */
+		mc->candidate = janus_string_replace(mc->candidate, mc->local, resolved);
+		/* Parse the candidate again */
+		janus_mutex_lock(&mc->handle->mutex);
+		(void)janus_sdp_parse_candidate(mc->handle->stream, mc->candidate, 1);
+		janus_mutex_unlock(&mc->handle->mutex);
+	}
+	g_free(resolved);
+	/* Get rid of the helper struct */
+	janus_refcount_decrease(&mc->handle->ref);
+	g_free(mc->candidate);
+	g_free(mc->local);
+	g_free(mc);
+}
+
 int janus_sdp_parse_candidate(void *ice_stream, const char *candidate, int trickle) {
 	if(ice_stream == NULL || candidate == NULL)
 		return -1;
@@ -570,7 +620,7 @@ int janus_sdp_parse_candidate(void *ice_stream, const char *candidate, int trick
 	if(handle == NULL)
 		return -2;
 	janus_ice_component *component = NULL;
-	if(strstr(candidate, "end-of-candidates")) {
+	if(strlen(candidate) == 0 || strstr(candidate, "end-of-candidates")) {
 		/* FIXME Should we do something with this? */
 		JANUS_LOG(LOG_VERB, "[%"SCNu64"] end-of-candidates received\n", handle->handle_id);
 		return 0;
@@ -579,9 +629,9 @@ int janus_sdp_parse_candidate(void *ice_stream, const char *candidate, int trick
 		/* Skipping the 'candidate:' prefix Firefox puts in trickle candidates */
 		candidate += strlen("candidate:");
 	}
-	char rfoundation[33], rtransport[4], rip[40], rtype[6], rrelip[40];
+	char rfoundation[33], rtransport[4], rip[50], rtype[6], rrelip[40];
 	guint32 rcomponent, rpriority, rport, rrelport;
-	int res = sscanf(candidate, "%32s %30u %3s %30u %39s %30u typ %5s %*s %39s %*s %30u",
+	int res = sscanf(candidate, "%32s %30u %3s %30u %49s %30u typ %5s %*s %39s %*s %30u",
 		rfoundation, &rcomponent, rtransport, &rpriority,
 			rip, &rport, rtype, rrelip, &rrelport);
 	if(res < 7) {
@@ -592,6 +642,31 @@ int janus_sdp_parse_candidate(void *ice_stream, const char *candidate, int trick
 		}
 	}
 	if(res >= 7) {
+		if(strstr(rip, ".local")) {
+			/* The IP is actually an mDNS address, try to resolve it
+			 * https://tools.ietf.org/html/draft-ietf-rtcweb-mdns-ice-candidates-04 */
+#if 0
+			if(!janus_ice_is_mdns_enabled()) {
+				/* ...unless mDNS resolution is disabled, in which case ignore this candidate */
+				JANUS_LOG(LOG_VERB, "[%"SCNu64"] mDNS candidate ignored\n", handle->handle_id);
+				return 0;
+			}
+#endif
+			/* We'll resolve this address asynchronously, in order not to keep this thread busy */
+			JANUS_LOG(LOG_VERB, "[%"SCNu64"] Resolving mDNS address (%s) asynchronously\n",
+				handle->handle_id, rip);
+			janus_sdp_mdns_candidate *mc = g_malloc(sizeof(janus_sdp_mdns_candidate));
+			janus_refcount_increase(&handle->ref);
+			mc->handle = handle;
+			mc->candidate = g_strdup(candidate);
+			mc->local = g_strdup(rip);
+			mc->cancellable = NULL;
+			GResolver *resolver = g_resolver_get_default();
+			g_resolver_lookup_by_name_async(resolver, rip, NULL,
+				(GAsyncReadyCallback)janus_sdp_mdns_resolved, mc);
+			g_object_unref(resolver);
+			return 0;
+		}
 		/* Add remote candidate */
 		component = stream->component;
 		if(component == NULL || rcomponent > 1) {
@@ -692,7 +767,13 @@ int janus_sdp_parse_candidate(void *ice_stream, const char *candidate, int trick
 #endif
 				strncpy(c->foundation, rfoundation, NICE_CANDIDATE_MAX_FOUNDATION);
 				c->priority = rpriority;
-				nice_address_set_from_string(&c->addr, rip);
+				gboolean added = nice_address_set_from_string(&c->addr, rip);
+				if(!added) {
+					JANUS_LOG(LOG_WARN, "[%"SCNu64"]    Invalid address '%s', skipping %s candidate (%s)\n",
+						handle->handle_id, rip, rtype, candidate);
+					nice_candidate_free(c);
+					return 0;
+				}
 				nice_address_set_port(&c->addr, rport);
 				c->username = g_strdup(stream->ruser);
 				c->password = g_strdup(stream->rpass);
@@ -980,6 +1061,7 @@ int janus_sdp_anonymize(janus_sdp *anon) {
 					|| !strcasecmp(a->name, "rtcp-mux")
 					|| !strcasecmp(a->name, "rtcp-rsize")
 					|| !strcasecmp(a->name, "candidate")
+					|| !strcasecmp(a->name, "end-of-candidates")
 					|| !strcasecmp(a->name, "ssrc")
 					|| !strcasecmp(a->name, "ssrc-group")
 					|| !strcasecmp(a->name, "sctpmap")

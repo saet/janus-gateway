@@ -171,6 +171,7 @@ static gint stop_signal = 0;
 gint janus_is_stopping(void) {
 	return g_atomic_int_get(&stop);
 }
+static GMainLoop *mainloop = NULL;
 
 
 /* Public instance name */
@@ -345,6 +346,8 @@ static void janus_handle_signal(int signum) {
 	g_atomic_int_inc(&stop);
 	if(g_atomic_int_get(&stop) > 2)
 		exit(1);
+	if(mainloop && g_main_loop_is_running(mainloop))
+		g_main_loop_quit(mainloop);
 }
 
 /*! \brief Termination handler (atexit) */
@@ -4278,10 +4281,9 @@ gint main(int argc, char *argv[])
 		janus_events_notify_handlers(JANUS_EVENT_TYPE_CORE, 0, info);
 	}
 
-	while(!g_atomic_int_get(&stop)) {
-		/* Loop until we have to stop */
-		usleep(250000); /* A signal will cancel usleep() but not g_usleep() */
-	}
+	/* Loop until we have to stop */
+	mainloop = g_main_loop_new (NULL, TRUE);
+	g_main_loop_run(mainloop);
 
 	/* If the Event Handlers mechanism is enabled, notify handlers that Janus is hanging up */
 	if(janus_events_is_enabled()) {
