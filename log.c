@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "log.h"
 
@@ -31,6 +32,7 @@ struct janus_log_buffer {
 
 static gboolean janus_log_console = TRUE;
 static char *janus_log_filepath = NULL;
+static char *janus_log_filepath2 = NULL;
 static FILE *janus_log_file = NULL;
 
 static gint initialized = 0;
@@ -93,7 +95,8 @@ static janus_log_buffer *janus_log_getbuf(void) {
 
 static void *janus_log_thread(void *ctx) {
 	janus_log_buffer *head, *b, *tofree = NULL;
-
+	struct stat st;
+	
 	while (!g_atomic_int_get(&stopping)) {
 		g_mutex_lock(&lock);
 		if (!printhead) {
@@ -126,8 +129,15 @@ static void *janus_log_thread(void *ctx) {
 			g_mutex_unlock(&lock);
 			if(janus_log_console)
 				fflush(stdout);
-			if(janus_log_file)
+			if(janus_log_file) {
 				fflush(janus_log_file);
+				stat(janus_log_filepath, &st);
+				if(st.st_size > (100*1024*1024)) {
+					fclose(janus_log_file);
+					rename(janus_log_filepath, janus_log_filepath2);
+					janus_log_file = fopen(janus_log_filepath, "awt");
+				}
+			}
 			janus_log_freebuffers(&tofree);
 		}
 	}
@@ -152,6 +162,8 @@ static void *janus_log_thread(void *ctx) {
 	janus_log_file = NULL;
 	g_free(janus_log_filepath);
 	janus_log_filepath = NULL;
+	g_free(janus_log_filepath2);
+	janus_log_filepath2 = NULL;
 
 	return NULL;
 }
@@ -205,6 +217,9 @@ int janus_log_init(gboolean daemon, gboolean console, const char *logfile) {
 			return -1;
 		}
 		janus_log_filepath = g_strdup(logfile);
+		janus_log_filepath2 = g_malloc(strlen(logfile)+4);
+		strcpy(janus_log_filepath2, logfile);
+		strcat(janus_log_filepath2, ".1");
 	}
 	if(!janus_log_console && logfile == NULL) {
 		g_print("WARNING: logging completely disabled!\n");
