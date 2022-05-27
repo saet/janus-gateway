@@ -3026,7 +3026,8 @@ void janus_plugin_relay_data(janus_plugin_session *plugin_session, char *buf, in
 			|| janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT))
 		return;
 #ifdef HAVE_SCTP
-	janus_ice_relay_data(handle, buf, len);
+#error TEXT o BINARY?
+	janus_ice_relay_data(handle, buf, len, FALSE);
 #else
 	JANUS_LOG(LOG_WARN, "Asked to relay data, but Data Channels support has not been compiled...\n");
 #endif

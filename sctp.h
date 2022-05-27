@@ -121,6 +121,8 @@ typedef struct janus_sctp_association {
 	size_t buflen;
 	/*! \brief Current offset of the buffer for handling partial messages */
 	size_t offset;
+	/*! \brief Buffer of pending messages */
+	GQueue *pending_messages;
 #ifdef DEBUG_SCTP
 	FILE *debug_dump;
 #endif
@@ -202,7 +204,7 @@ void janus_sctp_data_from_dtls(janus_sctp_association *sctp, char *buf, int len)
  * \param[in] sctp The SCTP association this data is from
  * \param[in] buf The data buffer
  * \param[in] len The buffer length */
-void janus_sctp_send_data(janus_sctp_association *sctp, char *buf, int len);
+void janus_sctp_send_data(janus_sctp_association *sctp, gboolean textdata, char *buf, int len);
 
 #endif
 

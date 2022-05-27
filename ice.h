@@ -569,7 +569,7 @@ void janus_ice_relay_rtcp(janus_ice_handle *handle, int video, char *buf, int le
  * @param[in] handle The Janus ICE handle associated with the peer
  * @param[in] buf The message data (buffer)
  * @param[in] len The buffer lenght */
-void janus_ice_relay_data(janus_ice_handle *handle, char *buf, int len);
+void janus_ice_relay_data(janus_ice_handle *handle, char *buf, int len, gboolean binary);
 /*! \brief Plugin SCTP/DataChannel callback, called by the SCTP stack when when there's data for a plugin
  * @param[in] handle The Janus ICE handle associated with the peer
  * @param[in] buffer The message data (buffer)
@@ -580,6 +580,9 @@ void janus_ice_incoming_data(janus_ice_handle *handle, char *buffer, int length)
  * @param[in] buffer The message data (buffer)
  * @param[in] length The buffer lenght */
 void janus_ice_relay_sctp(janus_ice_handle *handle, char *buffer, int length);
+/*! \brief Plugin SCTP/DataChannel callback, called by the SCTP stack when data can be written
+ * @param[in] handle The Janus ICE handle associated with the peer */
+void janus_ice_notify_data_ready(janus_ice_handle *handle);
 ///@}
 
 

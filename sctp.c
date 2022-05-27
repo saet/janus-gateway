@@ -53,10 +53,40 @@ static uint16_t event_types[] = {
 	SCTP_SHUTDOWN_EVENT,
 	SCTP_ADAPTATION_INDICATION,
 	SCTP_SEND_FAILED_EVENT,
+	SCTP_SENDER_DRY_EVENT,
 	SCTP_STREAM_RESET_EVENT,
 	SCTP_STREAM_CHANGE_EVENT
 };
 
+/* Buffered message (in case we can't send right away) */
+typedef struct janus_sctp_pending_message {
+	uint16_t id;
+	gboolean textdata;
+	char *buf;
+	size_t len;
+} janus_sctp_pending_message;
+static janus_sctp_pending_message *janus_sctp_pending_message_create(uint16_t id, gboolean textdata, char *buf, size_t len) {
+	janus_sctp_pending_message *m = g_malloc(sizeof(janus_sctp_pending_message));
+	m->id = id;
+	m->textdata = textdata;
+	if(buf != NULL && len > 0) {
+		m->buf = g_malloc(len);
+		memcpy(m->buf, buf, len);
+		m->len = len;
+	} else {
+		m->buf = NULL;
+		m->len = 0;
+	}
+	return m;
+}
+static void janus_sctp_pending_message_free(janus_sctp_pending_message *m) {
+	if(m != NULL) {
+		g_free(m->buf);
+		g_free(m);
+	}
+}
+
+/* usrsctp callbacks and methods */
 int janus_sctp_data_to_dtls(void *instance, void *buffer, size_t length, uint8_t tos, uint8_t set_df);
 static int janus_sctp_incoming_data(struct socket *sock, union sctp_sockstore addr, void *data, size_t datalen, struct sctp_rcvinfo rcv, int flags, void *ulp_info);
 janus_sctp_channel *janus_sctp_find_channel_by_stream(janus_sctp_association *sctp, uint16_t stream);
@@ -68,10 +98,11 @@ int janus_sctp_send_open_response_message(struct socket *sock, uint16_t stream);
 int janus_sctp_send_open_ack_message(struct socket *sock, uint16_t stream);
 void janus_sctp_send_deferred_messages(janus_sctp_association *sctp);
 int janus_sctp_open_channel(janus_sctp_association *sctp, uint8_t unordered, uint16_t pr_policy, uint32_t pr_value);
-int janus_sctp_send_text(janus_sctp_association *sctp, uint16_t id, char *text, size_t length);
+int janus_sctp_send_text_or_binary(janus_sctp_association *sctp, uint16_t id, gboolean textdata, char *text, size_t length);
 void janus_sctp_reset_outgoing_stream(janus_sctp_association *sctp, uint16_t stream);
 void janus_sctp_send_outgoing_stream_reset(janus_sctp_association *sctp);
 int janus_sctp_close_channel(janus_sctp_association *sctp, uint16_t id);
+void janus_sctp_data_ready(janus_sctp_association *sctp);
 void janus_sctp_handle_open_request_message(janus_sctp_association *sctp, janus_datachannel_open_request *req, size_t length, uint16_t stream);
 void janus_sctp_handle_open_response_message(janus_sctp_association *sctp, janus_datachannel_open_response *rsp, size_t length, uint16_t stream);
 void janus_sctp_handle_open_ack_message(janus_sctp_association *sctp, janus_datachannel_ack *ack, size_t length, uint16_t stream);
@@ -112,6 +143,8 @@ static void janus_sctp_association_free(const janus_refcount *sctp_ref) {
 	/* This association can be destroyed, free all the resources */
 	janus_refcount_decrease(&sctp->handle->ref);
 	janus_refcount_decrease(&sctp->dtls->ref);
+	if(sctp->pending_messages != NULL)
+		g_queue_free_full(sctp->pending_messages, (GDestroyNotify)janus_sctp_pending_message_free);
 #ifdef DEBUG_SCTP
 	if(sctp->debug_dump != NULL)
 		fclose(sctp->debug_dump);
@@ -334,8 +367,25 @@ static int janus_sctp_incoming_data(struct socket *sock, union sctp_sockstore ad
 	return 1;
 }
 
-void janus_sctp_send_data(janus_sctp_association *sctp, char *buf, int len) {
-	if(sctp == NULL || buf == NULL || len <= 0)
+void janus_sctp_send_data(janus_sctp_association *sctp, gboolean textdata, char *buf, int len) {
+	if(sctp == NULL)
+		return;
+	if(sctp->pending_messages != NULL && !g_queue_is_empty(sctp->pending_messages)) {
+		/* Messages waiting in the queue, send those first */
+		janus_sctp_pending_message *m = g_queue_peek_head(sctp->pending_messages);
+		while(m != NULL) {
+			int res = janus_sctp_send_text_or_binary(sctp, m->id, m->textdata, m->buf, m->len);
+			if(res == -2) {
+				JANUS_LOG(LOG_WARN, "[%"SCNu64"] Got EAGAIN when trying to resend pending message on channel %"SCNu16"\n",
+					sctp->handle_id, m->id);
+				break;
+			}
+			(void)g_queue_pop_head(sctp->pending_messages);
+			janus_sctp_pending_message_free(m);
+			m = g_queue_peek_head(sctp->pending_messages);
+		}
+	}
+	if(buf == NULL || len <= 0)
 		return;
 	JANUS_LOG(LOG_VERB, "[%"SCNu64"] SCTP data to send (%d bytes) coming from a plugin.\n",
 		  sctp->handle_id, len);
@@ -351,27 +401,47 @@ void janus_sctp_send_data(janus_sctp_association *sctp, char *buf, int len) {
 		}
 	}
 	if(!found) {
-		JANUS_LOG(LOG_WARN, "[%"SCNu64"] Couldn't send data, channel %i is not open yet\n", sctp->handle_id, i);
-		return;
-		//~ /* FIXME There's no open channel (shouldn't happen, we always create it in janus.js), try opening one now */
-		//~ if(janus_sctp_open_channel(sctp, 0, 0, 0) < 0) {
-			//~ JANUS_LOG(LOG_ERR, "[%"SCNu64"] Couldn't open channel...\n", sctp->handle_id);
-			//~ return;
-		//~ }
-		//~ for(i = 0; i < NUMBER_OF_CHANNELS; i++) {
-			//~ if(sctp->channels[i].state != DATA_CHANNEL_CLOSED) {
-				//~ found = 1;
-				//~ JANUS_LOG(LOG_VERB, "[%"SCNu64"]   -- Using open channel %i\n", sctp->handle_id, i);
-				//~ break;
-			//~ }
-		//~ }
-		//~ if(!found) {
-			//~ JANUS_LOG(LOG_ERR, "[%"SCNu64"] Channel opened but not found?? giving up...\n", sctp->handle_id);
-			//~ return;
-		//~ }
+		/* There's no open channel, try opening one now */
+		JANUS_LOG(LOG_VERB, "[%"SCNu64"] Creating channel...\n", sctp->handle_id);
+		if(janus_sctp_open_channel(sctp, 0, 0, 0) < 0) {
+			JANUS_LOG(LOG_ERR, "[%"SCNu64"] Couldn't open channel...\n", sctp->handle_id);
+			return;
+		}
+		for(i = 0; i < NUMBER_OF_CHANNELS; i++) {
+			if(sctp->channels[i].state != DATA_CHANNEL_CLOSED) {
+				found = 1;
+				JANUS_LOG(LOG_VERB, "[%"SCNu64"]   -- Using open channel %i\n", sctp->handle_id, i);
+				break;
+			}
+		}
+		if(!found) {
+			JANUS_LOG(LOG_ERR, "[%"SCNu64"] Channel opened but not found?? giving up...\n", sctp->handle_id);
+			return;
+		}
 	}
-	/* FIXME We're assuming this is a string (we don't support binary data yet) */
-	janus_sctp_send_text(sctp, i, buf, len);
+	/* Send the data, whether it's text or binary */
+	if(sctp->pending_messages != NULL && !g_queue_is_empty(sctp->pending_messages)) {
+		/* We couldn't send all pending messages, queue the new one as well */
+		if(buf != NULL && len > 0) {
+			JANUS_LOG(LOG_WARN, "[%"SCNu64"] Couldn't send all pending messages, queueing new message\n",
+				sctp->handle_id);
+			janus_sctp_pending_message *m = janus_sctp_pending_message_create(i, textdata, buf, len);
+			if(sctp->pending_messages == NULL)
+				sctp->pending_messages = g_queue_new();
+			g_queue_push_tail(sctp->pending_messages, m);
+		}
+		return;
+	}
+	int res = janus_sctp_send_text_or_binary(sctp, i, textdata, buf, len);
+	if(res == -2) {
+		/* Delivery failed with an EAGAIN, queue and retry later */
+		JANUS_LOG(LOG_WARN, "[%"SCNu64"] Got EAGAIN when trying to send message on channel %"SCNu16", retrying later\n",
+			sctp->handle_id, i);
+		janus_sctp_pending_message *m = janus_sctp_pending_message_create(i, textdata, buf, len);
+		if(sctp->pending_messages == NULL)
+			sctp->pending_messages = g_queue_new();
+		g_queue_push_tail(sctp->pending_messages, m);
+	}
 }
 
 
@@ -651,7 +721,7 @@ int janus_sctp_open_channel(janus_sctp_association *sctp, uint8_t unordered, uin
 	return 0;
 }
 
-int janus_sctp_send_text(janus_sctp_association *sctp, uint16_t id, char *text, size_t length) {
+int janus_sctp_send_text_or_binary(janus_sctp_association *sctp, uint16_t id, gboolean textdata, char *text, size_t length) {
 	if(id >= NUMBER_OF_CHANNELS || text == NULL)
 		return -1;
 	struct sctp_sendv_spa spa;
@@ -673,7 +743,7 @@ int janus_sctp_send_text(janus_sctp_association *sctp, uint16_t id, char *text, 
 	} else {
 		spa.sendv_sndinfo.snd_flags = SCTP_EOR;
 	}
-	spa.sendv_sndinfo.snd_ppid = htonl(DATA_CHANNEL_PPID_DOMSTRING);
+	spa.sendv_sndinfo.snd_ppid = htonl(textdata ? DATA_CHANNEL_PPID_DOMSTRING : DATA_CHANNEL_PPID_BINARY);
 	spa.sendv_flags = SCTP_SEND_SNDINFO_VALID;
 	if((channel->pr_policy == SCTP_PR_SCTP_TTL) || (channel->pr_policy == SCTP_PR_SCTP_RTX)) {
 		spa.sendv_prinfo.pr_policy = channel->pr_policy;
@@ -683,10 +753,15 @@ int janus_sctp_send_text(janus_sctp_association *sctp, uint16_t id, char *text, 
 	if(usrsctp_sendv(sctp->sock, text, length, NULL, 0,
 			&spa, (socklen_t)sizeof(struct sctp_sendv_spa),
 			SCTP_SENDV_SPA, 0) < 0) {
-		JANUS_LOG(LOG_ERR, "[%"SCNu64"] sctp_sendv error (%d)\n", sctp->handle_id, errno);
+		int res = errno;
+		if(res == EAGAIN) {
+			/* Couldn't send the message right away, add to the queue and retry later */
+			return -2;
+		}
+		JANUS_LOG(LOG_ERR, "[%"SCNu64"] sctp_sendv error (%d)\n", sctp->handle_id, res);
 		return -1;
 	}
-	JANUS_LOG(LOG_VERB, "[%"SCNu64"] Message sent on channel %"SCNu16"\n", sctp->handle_id, id); 
+	JANUS_LOG(LOG_VERB, "[%"SCNu64"] Message sent on channel %"SCNu16"\n", sctp->handle_id, id);
 	return 0;
 }
 
@@ -743,6 +818,29 @@ int janus_sctp_close_channel(janus_sctp_association *sctp, uint16_t id) {
 	janus_sctp_send_outgoing_stream_reset(sctp);
 	channel->state = DATA_CHANNEL_CLOSING;
 	return 0;
+}
+
+void janus_sctp_data_ready(janus_sctp_association *sctp) {
+	if(sctp == NULL || g_atomic_int_get(&sctp->destroyed))
+		return;
+
+	if(sctp->pending_messages != NULL && !g_queue_is_empty(sctp->pending_messages)) {
+		/* Messages waiting in the queue, send those first */
+		janus_sctp_pending_message *m = g_queue_peek_head(sctp->pending_messages);
+		while(m != NULL) {
+			int res = janus_sctp_send_text_or_binary(sctp, m->id, m->textdata, m->buf, m->len);
+			if(res == -2) {
+				JANUS_LOG(LOG_WARN, "[%"SCNu64"] Got EAGAIN when trying to resend pending message on channel %"SCNu16"\n",
+					sctp->handle_id, m->id);
+				break;
+			}
+			(void)g_queue_pop_head(sctp->pending_messages);
+			janus_sctp_pending_message_free(m);
+			m = g_queue_peek_head(sctp->pending_messages);
+		}
+	}
+
+	janus_dtls_sctp_data_ready(sctp->dtls);
 }
 
 void janus_sctp_handle_open_request_message(janus_sctp_association *sctp, janus_datachannel_open_request *req, size_t length, uint16_t stream) {
@@ -908,14 +1006,13 @@ void janus_sctp_handle_data_message(janus_sctp_association *sctp, char *buffer, 
 		JANUS_LOG(LOG_WARN, "[%"SCNu64"] Got data from this SCTP association but channel isn't open yet...\n", sctp->handle_id);
 		return;
 	} else {
-		/* Assuming DATA_CHANNEL_PPID_DOMSTRING */
 		/* XXX: Protect for non 0 terminated buffer */
 		JANUS_LOG(LOG_VERB, "[%"SCNu64"] SCTP data received of length %zu on channel with id %d.\n",
 		       sctp->handle_id, length, channel->id);
 		JANUS_LOG(LOG_HUGE, "[%"SCNu64"] Incoming SCTP contents: %.*s\n",
 		       sctp->handle_id, (int)length, buffer);
-		/* FIXME: notify this to the core */
-		janus_dtls_notify_data(sctp->dtls, buffer, (int)length);
+		/* Pass this to the core */
+		janus_dtls_notify_sctp_data(sctp->dtls, buffer, (int)length);
 	}
 	return;
 }
@@ -1235,6 +1332,8 @@ void janus_sctp_handle_notification(janus_sctp_association *sctp, union sctp_not
 		case SCTP_AUTHENTICATION_EVENT:
 			break;
 		case SCTP_SENDER_DRY_EVENT:
+			/* Internal buffers empty, notify the application they can send again */
+			janus_sctp_data_ready(sctp);
 			break;
 		case SCTP_NOTIFICATIONS_STOPPED_EVENT:
 			break;
@@ -1250,6 +1349,8 @@ void janus_sctp_handle_notification(janus_sctp_association *sctp, union sctp_not
 		case SCTP_ASSOC_RESET_EVENT:
 			break;
 		case SCTP_STREAM_CHANGE_EVENT:
+			JANUS_LOG(LOG_VERB, "[%"SCNu64"] Stream change (in/out) = (%u/%u)\n", sctp ? sctp->handle_id : 0,
+				notif->sn_strchange_event.strchange_instrms, notif->sn_strchange_event.strchange_outstrms);
 			break;
 		default:
 			break;

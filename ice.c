@@ -220,8 +220,9 @@ static gboolean janus_is_rtcp(gchar *buf) {
 
 #define JANUS_ICE_PACKET_AUDIO	0
 #define JANUS_ICE_PACKET_VIDEO	1
-#define JANUS_ICE_PACKET_DATA	2
-#define JANUS_ICE_PACKET_SCTP	3
+#define JANUS_ICE_PACKET_TEXT	2
+#define JANUS_ICE_PACKET_BINARY	3
+#define JANUS_ICE_PACKET_SCTP	4
 /* Janus enqueued (S)RTP/(S)RTCP packet to send */
 typedef struct janus_ice_queued_packet {
 	char *data;
@@ -233,7 +234,10 @@ typedef struct janus_ice_queued_packet {
 	gint64 added;
 } janus_ice_queued_packet;
 /* This is a static, fake, message we use as a trigger to send a DTLS alert */
-static janus_ice_queued_packet janus_ice_dtls_handshake, janus_ice_dtls_alert;
+static janus_ice_queued_packet
+	janus_ice_dtls_handshake,
+	janus_ice_dtls_alert,
+	janus_ice_data_ready;
 
 /* Janus NACKed packet we're tracking (to avoid duplicates) */
 typedef struct janus_ice_nacked_packet {
@@ -336,7 +340,8 @@ static inline void janus_ice_free_rtp_packet(janus_rtp_packet *pkt) {
 }
 
 static inline void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
-	if(pkt == NULL || pkt == &janus_ice_dtls_alert || pkt == &janus_ice_dtls_alert) {
+	if(pkt == NULL || pkt == &janus_ice_dtls_handshake ||
+	   pkt == &janus_ice_dtls_alert || pkt == &janus_ice_data_ready) {
 		return;
 	}
 
@@ -3605,6 +3610,16 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 			(void)janus_ice_outgoing_stats_handle(handle);
 		}
 		return G_SOURCE_REMOVE;
+	} else if(pkt == &janus_ice_data_ready) {
+		/* Data is writable on this PeerConnection, notify the plugin */
+#if 0
+		janus_plugin *plugin = (janus_plugin *)handle->app;
+		if(plugin != NULL && plugin->data_ready != NULL && handle->app_handle != NULL) {
+			JANUS_LOG(LOG_HUGE, "[%"SCNu64"] Telling the plugin about the data channel being ready (%s)\n",
+				handle->handle_id, plugin ? plugin->get_name() : "??");
+			plugin->data_ready(handle->app_handle);
+		}
+#endif
 	}
 	if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_READY)) {
 		janus_ice_free_queued_packet(pkt);
@@ -3923,7 +3938,7 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 					}
 				}
 			}
-		} else if(pkt->type == JANUS_ICE_PACKET_DATA) {
+		} else if(pkt->type == JANUS_ICE_PACKET_TEXT || pkt->type == JANUS_ICE_PACKET_BINARY) {
 			/* Data */
 			if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_DATA_CHANNELS)) {
 				janus_ice_free_queued_packet(pkt);
@@ -3939,7 +3954,7 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 				return G_SOURCE_CONTINUE;
 			}
 			component->noerrorlog = FALSE;
-			janus_dtls_wrap_sctp_data(component->dtls, pkt->data, pkt->length);
+			janus_dtls_wrap_sctp_data(component->dtls, pkt->type == JANUS_ICE_PACKET_TEXT, pkt->data, pkt->length);
 #endif
 		} else if(pkt->type == JANUS_ICE_PACKET_SCTP) {
 			/* SCTP data to push */
@@ -4046,7 +4061,7 @@ void janus_ice_relay_rtcp(janus_ice_handle *handle, int video, char *buf, int le
 }
 
 #ifdef HAVE_SCTP
-void janus_ice_relay_data(janus_ice_handle *handle, char *buf, int len) {
+void janus_ice_relay_data(janus_ice_handle *handle, char *buf, int len, gboolean binary) {
 	if(!handle || handle->queued_packets == NULL || buf == NULL || len < 1)
 		return;
 	/* Queue this packet */
@@ -4054,7 +4069,7 @@ void janus_ice_relay_data(janus_ice_handle *handle, char *buf, int len) {
 	pkt->data = g_malloc(len);
 	memcpy(pkt->data, buf, len);
 	pkt->length = len;
-	pkt->type = JANUS_ICE_PACKET_DATA;
+	pkt->type = binary ? JANUS_ICE_PACKET_BINARY : JANUS_ICE_PACKET_TEXT;
 	pkt->control = FALSE;
 	pkt->encrypted = FALSE;
 	pkt->retransmission = FALSE;
@@ -4078,6 +4093,21 @@ void janus_ice_relay_sctp(janus_ice_handle *handle, char *buffer, int length) {
 	pkt->retransmission = FALSE;
 	pkt->added = janus_get_monotonic_time();
 	janus_ice_queue_packet(handle, pkt);
+#endif
+}
+
+void janus_ice_notify_data_ready(janus_ice_handle *handle) {
+        JANUS_LOG(LOG_VERB, "[%"SCNu64"] ICE data ready\n", handle->handle_id);
+#ifdef HAVE_SCTP
+	if(!handle || handle->queued_packets == NULL)
+		return;
+	/* Queue this event */
+#if GLIB_CHECK_VERSION(2, 46, 0)
+	g_async_queue_push_front(handle->queued_packets, &janus_ice_data_ready);
+#else
+	g_async_queue_push(handle->queued_packets, &janus_ice_data_ready);
+#endif
+	g_main_context_wakeup(handle->icectx);
 #endif
 }
 

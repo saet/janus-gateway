@@ -880,7 +880,10 @@ void janus_dtls_srtp_incoming_msg(janus_dtls_srtp *dtls, char *buf, uint16_t len
 #ifdef HAVE_SCTP
 				if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_DATA_CHANNELS)) {
 					/* Create SCTP association as well */
-					janus_dtls_srtp_create_sctp(dtls);
+					res = janus_dtls_srtp_create_sctp(dtls);
+					if(res != 0) {
+						JANUS_LOG(LOG_ERR, "[%"SCNu64"] janus_dtls_srtp_create_sctp err:%d\n", handle->handle_id, res);
+					}
 				}
 #endif
 				dtls->ready = 1;
@@ -1008,10 +1011,31 @@ void janus_dtls_fd_bridge(janus_dtls_srtp *dtls) {
 }
 
 #ifdef HAVE_SCTP
-void janus_dtls_wrap_sctp_data(janus_dtls_srtp *dtls, char *buf, int len) {
+void janus_dtls_sctp_data_ready(janus_dtls_srtp *dtls) {
+	if(dtls == NULL)
+		return;
+	janus_ice_component *component = (janus_ice_component *)dtls->component;
+	if(component == NULL) {
+		JANUS_LOG(LOG_ERR, "No component...\n");
+		return;
+	}
+	janus_ice_stream *stream = component->stream;
+	if(!stream) {
+		JANUS_LOG(LOG_ERR, "No stream...\n");
+		return;
+	}
+	janus_ice_handle *handle = stream->handle;
+	if(!handle || !handle->agent || !dtls->write_bio) {
+		JANUS_LOG(LOG_ERR, "No handle...\n");
+		return;
+	}
+	janus_ice_notify_data_ready(handle);
+}
+
+void janus_dtls_wrap_sctp_data(janus_dtls_srtp *dtls, gboolean textdata, char *buf, int len) {
 	if(dtls == NULL || !dtls->ready || dtls->sctp == NULL || buf == NULL || len < 1)
 		return;
-	janus_sctp_send_data(dtls->sctp, buf, len);
+	janus_sctp_send_data(dtls->sctp, textdata, buf, len);
 }
 
 int janus_dtls_send_sctp_data(janus_dtls_srtp *dtls, char *buf, int len) {
@@ -1027,7 +1051,7 @@ int janus_dtls_send_sctp_data(janus_dtls_srtp *dtls, char *buf, int len) {
 	return res;
 }
 
-void janus_dtls_notify_data(janus_dtls_srtp *dtls, char *buf, int len) {
+void janus_dtls_notify_sctp_data(janus_dtls_srtp *dtls, char *buf, int len) {
 	if(dtls == NULL || buf == NULL || len < 1)
 		return;
 	janus_ice_component *component = (janus_ice_component *)dtls->component;
