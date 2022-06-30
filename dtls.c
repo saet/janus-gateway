@@ -362,7 +362,12 @@ gint janus_dtls_srtp_init(const char *server_pem, const char *server_key, const 
 #else
 		"SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32");
 #endif
-
+	/* 30/06/2022 - OpenSSL su Bullseye imposta per default level 2, quindi almeno
+	   112 bit di sicurezza, ma la app ne offre 80 (level 1). Forzo quindi il
+	   level 1 per questo context e sbloccare la situazione. Altrimenti il datachannel
+	   non si apre. */
+	SSL_CTX_set_security_level(ssl_ctx, 1);
+	
 	if(!server_pem && !server_key) {
 		JANUS_LOG(LOG_WARN, "No cert/key specified, autogenerating some...\n");
 		if(janus_dtls_generate_keys(&ssl_cert, &ssl_key) != 0) {
