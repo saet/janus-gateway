@@ -438,6 +438,10 @@ static janus_mutex sessions_mutex;
 static GHashTable *sessions = NULL;
 static GMainContext *sessions_watchdog_context = NULL;
 
+GMainContext* janus_get_sessions_watchdog_context(void)
+{
+	return sessions_watchdog_context;
+}
 
 static void janus_ice_handle_dereference(janus_ice_handle *handle) {
 	if(handle)

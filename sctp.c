@@ -163,6 +163,7 @@ janus_sctp_association *janus_sctp_association_create(janus_dtls_srtp *dtls, jan
 	 * be encapsulated in DTLS and actually sent/received by libnice, and not by
 	 * usrsctp itself... as such, we make use of the AF_CONN approach */
 
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (a)\n", sctp->handle_id);
 	janus_sctp_association *sctp = g_malloc0(sizeof(janus_sctp_association));
 	janus_refcount_init(&sctp->ref, janus_sctp_association_free);
 	g_atomic_int_set(&sctp->destroyed, 0);
@@ -204,8 +205,11 @@ janus_sctp_association *janus_sctp_association_create(janus_dtls_srtp *dtls, jan
 	sctp->stream_buffer_counter = 0;
 	sctp->sock = NULL;
 
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (b)\n", sctp->handle_id);
 	usrsctp_register_address((void *)sctp);
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (c)\n", sctp->handle_id);
 	usrsctp_sysctl_set_sctp_ecn_enable(0);
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (d)\n", sctp->handle_id);
 	if((sock = usrsctp_socket(AF_CONN, SOCK_STREAM, IPPROTO_SCTP, janus_sctp_incoming_data, NULL, 0, (void *)sctp)) == NULL) {
 		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error creating usrsctp socket... (%d)\n", sctp->handle_id, errno);
 		janus_refcount_decrease(&sctp->ref);
@@ -213,12 +217,14 @@ janus_sctp_association *janus_sctp_association_create(janus_dtls_srtp *dtls, jan
 	}
 	/* Make the socket non-blocking. Connect, close, shutdown etc will not block
 	 * the thread waiting for the socket operation to complete. */
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (e)\n", sctp->handle_id);
 	if (usrsctp_set_non_blocking(sock, 1) < 0) {
 		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error setting socket to non-blocking... (%d)\n", sctp->handle_id, errno);
 		janus_refcount_decrease(&sctp->ref);
 		return NULL;
 	}
 	/* Set SO_LINGER */
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (f)\n", sctp->handle_id);
 	struct linger linger_opt;
 	linger_opt.l_onoff = 1;
 	linger_opt.l_linger = 0;
@@ -228,6 +234,7 @@ janus_sctp_association *janus_sctp_association_create(janus_dtls_srtp *dtls, jan
 		return NULL;
 	}
 	/* Allow resetting streams */
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (g)\n", sctp->handle_id);
 	struct sctp_assoc_value av;
 	av.assoc_id = SCTP_ALL_ASSOC;
 	av.assoc_value = 1;
@@ -237,12 +244,14 @@ janus_sctp_association *janus_sctp_association_create(janus_dtls_srtp *dtls, jan
 		return NULL;
 	}
 	/* Disable Nagle */
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (h)\n", sctp->handle_id);
 	uint32_t nodelay = 1;
 	if(usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_NODELAY, &nodelay, sizeof(nodelay))) {
 		JANUS_LOG(LOG_ERR, "[%"SCNu64"] setsockopt error: SCTP_NODELAY (%d)\n", sctp->handle_id, errno);
 		janus_refcount_decrease(&sctp->ref);
 		return NULL;
 	}	
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (i)\n", sctp->handle_id);
 	/* Enable the events of interest */
 	struct sctp_event event;
 	memset(&event, 0, sizeof(event));
@@ -257,16 +266,19 @@ janus_sctp_association *janus_sctp_association_create(janus_dtls_srtp *dtls, jan
 		}
 	}
 	/* Configure our INIT message */
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (j)\n", sctp->handle_id);
 	struct sctp_initmsg initmsg;
 	memset(&initmsg, 0, sizeof(struct sctp_initmsg));
 	initmsg.sinit_num_ostreams = 16;	/* What Firefox says in the INIT (Chrome says 1023) */
 	initmsg.sinit_max_instreams = 2048;	/* What both Chrome and Firefox say in the INIT */
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (k)\n", sctp->handle_id);
 	if(usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_INITMSG, &initmsg, sizeof(struct sctp_initmsg)) < 0) {
 		JANUS_LOG(LOG_ERR, "[%"SCNu64"] setsockopt error: SCTP_INITMSG (%d)\n", sctp->handle_id, errno);
 		janus_refcount_decrease(&sctp->ref);
 		return NULL;
 	}
 	/* Bind our side of the communication, using AF_CONN as we're doing the actual delivery ourselves */
+JANUS_LOG(LOG_VERB, "[%"SCNu64"] janus_sctp_association_create (l)\n", sctp->handle_id);
 	memset(&sconn, 0, sizeof(struct sockaddr_conn));
 	sconn.sconn_family = AF_CONN;
 	sconn.sconn_port = htons(sctp->local_port);

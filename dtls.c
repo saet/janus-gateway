@@ -609,6 +609,24 @@ int janus_dtls_srtp_create_sctp(janus_dtls_srtp *dtls) {
 #endif
 }
 
+GMainContext* janus_get_sessions_watchdog_context(void);
+
+gboolean janus_giancarlo_timeout(gpointer user_data)
+{
+  FILE *fp;
+  time_t t;
+  fp = fopen("/tmp/janus_datachannel.log", "a");
+  if(fp)
+  {
+    t = time(NULL);
+    fprintf(fp, "%s", ctime(&t));
+    fclose(fp);
+  }
+  janus_ice_handle *handle = user_data;
+  JANUS_LOG(LOG_ERR, "[%"SCNu64"] ***** timeout *****\n", handle->handle_id);
+  exit(0);
+}
+
 void janus_dtls_srtp_incoming_msg(janus_dtls_srtp *dtls, char *buf, uint16_t len) {
 	if(dtls == NULL) {
 		JANUS_LOG(LOG_ERR, "No DTLS-SRTP stack, no incoming message...\n");
@@ -885,10 +903,23 @@ void janus_dtls_srtp_incoming_msg(janus_dtls_srtp *dtls, char *buf, uint16_t len
 #ifdef HAVE_SCTP
 				if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_DATA_CHANNELS)) {
 					/* Create SCTP association as well */
+/*** GC 12-07-2022 ****/
+GSource *s;
+GMainContext *wdt = janus_get_sessions_watchdog_context();
+s = g_timeout_source_new_seconds(2);
+g_source_set_priority(s, G_PRIORITY_DEFAULT);
+g_source_set_callback(s, janus_giancarlo_timeout, handle, NULL);
+g_source_attach(s, wdt);
+g_source_unref(s);
+/*** GC 12-07-2022 ****/
+
 					res = janus_dtls_srtp_create_sctp(dtls);
 					if(res != 0) {
 						JANUS_LOG(LOG_ERR, "[%"SCNu64"] janus_dtls_srtp_create_sctp err:%d\n", handle->handle_id, res);
 					}
+/*** GC 12-07-2022 ****/
+g_source_destroy(s);
+/*** GC 12-07-2022 ****/
 				}
 #endif
 				dtls->ready = 1;
