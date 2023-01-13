@@ -1,0 +1,7 @@
+version: '3.9'
+services:
+  janus-gateway-devbox:
+    container_name: devbox
+    build: .
+    volumes:
+      - ./janus-docker:/janus-gateway/docker-shared

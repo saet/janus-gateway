@@ -11,20 +11,20 @@ docker run --privileged --rm tonistiigi/binfmt --install arm64
 ## Build and run image
 
 ```bash
-docker build . --platform linux/arm64 -t janus-gateway-devbox
-docker run --rm -d --name devbox janus-gateway-devbox
+# build and run (takes at least 30 min)
+docker compose up -d --build
 ```
 
 To enter container:
 ```bash
 # check if running
-docker ps
+docker compose ps
 
 # enter with bash in container
-docker exec -it devbox bash
+docker compose exec -it janus-gateway-devbox bash
 ```
 
 To stop container:
 ```bash
-docker kill devbox
+docker compose stop -t 0
 ```
