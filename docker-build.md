@@ -28,3 +28,11 @@ To stop container:
 ```bash
 docker compose stop -t 0
 ```
+
+## TODO
+
+1. include custom plugins
+2. modify autotools to include custom plugins in build
+3. modify autotools to link to jannson lib (libjansson.so)
+4. add instruction to export janus build via docker volume
+5. update janus.js in dependencies
