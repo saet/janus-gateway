@@ -12,7 +12,8 @@ docker run --privileged --rm tonistiigi/binfmt --install arm64
 
 ```bash
 # build and run (takes at least 30 min)
-docker compose up -d --build
+docker compose build --progress=plain
+docker compose up -d
 ```
 
 To enter container:

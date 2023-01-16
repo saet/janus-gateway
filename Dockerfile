@@ -38,9 +38,9 @@ FROM clean-env AS builder
 
 # build janus-gateway
 RUN sh autogen.sh && \
-    ./configure --prefix=/janus-gateway/build && \
+    ./configure && \
     make && \
-    make install
+    make DESTDIR=/janus-gateway/build install
 
 FROM builder as devbox
 

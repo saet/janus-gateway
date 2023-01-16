@@ -3,7 +3,6 @@
 .github
 build
 Dockerfile
-*.md
 
 Makefile.in
 /ar-lib
