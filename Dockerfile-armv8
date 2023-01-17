@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=arm32v7/debian:buster
+ARG BASE_IMAGE=arm64v8/debian:11
 
 FROM ${BASE_IMAGE} AS clean-env
 
@@ -8,17 +8,7 @@ RUN apt-get update && \
     	libmicrohttpd-dev libjansson-dev \
 		libssl-dev libsofia-sip-ua-dev libglib2.0-dev \
 		libopus-dev libogg-dev libcurl4-openssl-dev liblua5.3-dev \
-		libconfig-dev pkg-config libtool automake libnice-dev
-
-# install libsrtp with openssl support on armv7 only for aes_gcm_128_16 support
-WORKDIR /
-RUN git clone https://github.com/cisco/libsrtp.git && \
-    cd libsrtp && \
-	git checkout 90d05bf8980d16e4ac3f16c19b77e296c4bc207b && \
-    ./configure --prefix=/usr --enable-openssl --enable-nss && \
-    make && \
-    make install && \
-    make DESTDIR=/janus-gateway/build install
+		libconfig-dev pkg-config libtool automake libnice-dev libsrtp2-dev
 
 # install usrsctp to enable janus datachannel
 WORKDIR /
