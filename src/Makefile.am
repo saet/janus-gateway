@@ -392,6 +392,34 @@ plugins_libadd = \
 	$(PLUGINS_LIBS) \
 	$(NULL)
 
+# --- Saet START --- #
+
+if ENABLE_PLUGIN_PTZ
+plugin_LTLIBRARIES += plugins/libjanus_ptz.la
+plugins_libjanus_ptz_la_SOURCES = plugins/janus_ptz.c
+plugins_libjanus_ptz_la_CFLAGS = $(plugins_cflags)
+plugins_libjanus_ptz_la_LDFLAGS = $(plugins_ldflags)
+plugins_libjanus_ptz_la_LIBADD = $(plugins_libadd)
+endif
+
+if ENABLE_PLUGIN_VIDEOMUX
+plugin_LTLIBRARIES += plugins/libjanus_videomux.la
+plugins_libjanus_videomux_la_SOURCES = plugins/janus_videomux.c
+plugins_libjanus_videomux_la_CFLAGS = $(plugins_cflags)
+plugins_libjanus_videomux_la_LDFLAGS = $(plugins_ldflags)
+plugins_libjanus_videomux_la_LIBADD = $(plugins_libadd)
+endif
+
+if ENABLE_PLUGIN_FRAME
+plugin_LTLIBRARIES += plugins/libjanus_frame.la
+plugins_libjanus_frame_la_SOURCES = plugins/janus_frame.c
+plugins_libjanus_frame_la_CFLAGS = $(plugins_cflags)
+plugins_libjanus_frame_la_LDFLAGS = $(plugins_ldflags)
+plugins_libjanus_frame_la_LIBADD = $(plugins_libadd)
+endif
+
+# --- Saet END --- #
+
 if ENABLE_PLUGIN_AUDIOBRIDGE
 plugin_LTLIBRARIES += plugins/libjanus_audiobridge.la
 plugins_libjanus_audiobridge_la_SOURCES = plugins/janus_audiobridge.c

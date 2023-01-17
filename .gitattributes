@@ -1,1 +1,3 @@
 *.mulaw binary
+* text=auto
+* eol=auto

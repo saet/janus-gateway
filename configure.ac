@@ -187,6 +187,12 @@ AC_ARG_ENABLE([all-plugins],
                      [enable_plugin_videoroom=no])
                AS_IF([test "x$enable_plugin_voicemail" != "xyes"],
                      [enable_plugin_voicemail=no])
+               AS_IF([test "x$enable_plugin_ptz" != "xyes"],
+                     [enable_plugin_ptz=no])
+               AS_IF([test "x$enable_plugin_videomux" != "xyes"],
+                     [enable_plugin_videomux=no])
+               AS_IF([test "x$enable_plugin_frame" != "xyes"],
+                     [enable_plugin_frame=no])
               ],
               [])
 
@@ -777,6 +783,27 @@ AC_ARG_ENABLE([plugin-voicemail],
                      [enable_plugin_voicemail=no])],
               [enable_plugin_voicemail=maybe])
 
+AC_ARG_ENABLE([plugin-ptz],
+              [AS_HELP_STRING([--disable-plugin-ptz],
+                              [Disable PTZ plugin])],
+              [AS_IF([test "x$enable_plugin_ptz" != "xyes"],
+                     [enable_plugin_ptz=no])],
+              [enable_plugin_ptz=yes])
+
+AC_ARG_ENABLE([plugin-videomux],
+              [AS_HELP_STRING([--disable-plugin-videomux],
+                              [Disable videomux plugin])],
+              [AS_IF([test "x$enable_plugin_videomux" != "xyes"],
+                     [enable_plugin_videomux=no])],
+              [enable_plugin_videomux=yes])
+
+AC_ARG_ENABLE([plugin-frame],
+              [AS_HELP_STRING([--disable-plugin-frame],
+                              [Disable frame plugin])],
+              [AS_IF([test "x$enable_plugin_frame" != "xyes"],
+                     [enable_plugin_frame=no])],
+              [enable_plugin_frame=yes])
+
 PKG_CHECK_MODULES([SOFIA],
                   [sofia-sip-ua],
                   [
@@ -862,6 +889,9 @@ AM_CONDITIONAL([ENABLE_PLUGIN_VIDEOCALL], [test "x$enable_plugin_videocall" = "x
 AM_CONDITIONAL([ENABLE_PLUGIN_VIDEOROOM], [test "x$enable_plugin_videoroom" = "xyes"])
 AM_CONDITIONAL([ENABLE_PLUGIN_VOICEMAIL], [test "x$enable_plugin_voicemail" = "xyes"])
 AM_CONDITIONAL([ENABLE_PLUGIN_TEXTROOM], [test "x$enable_plugin_textroom" = "xyes"])
+AM_CONDITIONAL([ENABLE_PLUGIN_PTZ], [test "x$enable_plugin_ptz" = "xyes"])
+AM_CONDITIONAL([ENABLE_PLUGIN_VIDEOMUX], [test "x$enable_plugin_videomux" = "xyes"])
+AM_CONDITIONAL([ENABLE_PLUGIN_FRAME], [test "x$enable_plugin_frame" = "xyes"])
 
 
 ##
@@ -1074,6 +1104,15 @@ AM_COND_IF([ENABLE_PLUGIN_RECORDPLAY],
 AM_COND_IF([ENABLE_PLUGIN_TEXTROOM],
 	[echo "    Text Room:             yes"],
 	[echo "    Text Room:             no"])
+AM_COND_IF([ENABLE_PLUGIN_PTZ],
+	[echo "    PTZ:                   yes"],
+	[echo "    PTZ:                   no"])
+AM_COND_IF([ENABLE_PLUGIN_VIDEOMUX],
+	[echo "    Videomux:              yes"],
+	[echo "    Videomux:              no"])
+AM_COND_IF([ENABLE_PLUGIN_FRAME],
+	[echo "    Frame:                 yes"],
+	[echo "    Frame:                 no"])
 AM_COND_IF([ENABLE_PLUGIN_LUA],
 	[echo "    Lua Interpreter:       yes"],
 	[echo "    Lua Interpreter:       no"])

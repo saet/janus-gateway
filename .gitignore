@@ -67,3 +67,8 @@ p2m-cmdline.h
 
 .vscode
 node_modules
+
+# Saet
+src/plugins/janus_frame.c
+src/plugins/janus_videomux.c
+src/plugins/janus_ptz.c
