@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=arm64v8/debian:11
+ARG BASE_IMAGE=arm32v7/debian:buster
 
 FROM ${BASE_IMAGE} AS clean-env
 
@@ -17,16 +17,6 @@ RUN git clone https://github.com/sctplab/usrsctp && \
 	git checkout 87f52843f9cf7dda0d4239ec22946ab922f98876 && \
     ./bootstrap && \
     ./configure --prefix=/usr --disable-programs --disable-inet --disable-inet6 && \
-    make && \
-    make install
-
-# install jansson lib for json handling needed by custom janus plugins
-WORKDIR /
-RUN git clone https://github.com/akheron/jansson.git && \
-    cd jansson && \
-	git checkout 684e18c927e89615c2d501737e90018f4930d6c5 && \
-    autoreconf -i && \
-    ./configure && \
     make && \
     make install
 
