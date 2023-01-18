@@ -8,7 +8,8 @@ RUN apt-get update && \
     	libmicrohttpd-dev libjansson-dev \
 		libssl-dev libsofia-sip-ua-dev libglib2.0-dev \
 		libopus-dev libogg-dev libcurl4-openssl-dev liblua5.3-dev \
-		libconfig-dev pkg-config libtool automake libnice-dev
+		libconfig-dev pkg-config libtool automake python3 python3-pip python3-setuptools python3-wheel ninja-build && \
+    pip3 install meson
 
 # install libsrtp with openssl support on armv7 only for aes_gcm_128_16 support
 WORKDIR /
@@ -30,6 +31,13 @@ RUN git clone https://github.com/sctplab/usrsctp && \
     make && \
     make install && \
 	make DESTDIR=/janus-gateway/build install
+
+# install updated version of libnice
+WORKDIR /
+RUN git clone https://gitlab.freedesktop.org/libnice/libnice && \
+    cd libnice && \
+	git checkout 3d9cae16a5094aadb1651572644cb5786a8b4e2d && \
+    meson --prefix=/usr build && ninja -C build && ninja -C build install
 
 WORKDIR /janus-gateway
 
