@@ -29,7 +29,10 @@ FROM clean-env AS builder
 
 # build janus-gateway
 RUN sh autogen.sh && \
-    ./configure && \
+    ./configure --prefix=/opt/janus --disable-unix-sockets --disable-sample-event-handler --disable-gelf-event-handler \
+    --disable-plugin-audiobridge --disable-plugin-echotest --disable-plugin-recordplay --disable-plugin-sip \
+    --disable-plugin-nosip --disable-plugin-textroom --disable-plugin-videocall --disable-plugin-videoroom \
+    --disable-plugin-voicemail && \
     make && \
     make DESTDIR=/janus-gateway/build install
 
