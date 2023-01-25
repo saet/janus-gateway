@@ -37,7 +37,14 @@ WORKDIR /
 RUN git clone https://gitlab.freedesktop.org/libnice/libnice && \
     cd libnice && \
 	git checkout 3d9cae16a5094aadb1651572644cb5786a8b4e2d && \
-    meson --prefix=/usr build && ninja -C build && ninja -C build install
+    meson --prefix=/usr build && \
+    ninja -C build && \
+    ninja -C build install && \
+    DESTDIR=/janus-gateway/build ninja -C build install
+
+# export libogg since janus streaming plugins now requires it
+RUN mkdir -p /janus-gateway/build/usr/lib && \
+    cp -r /usr/lib/arm-linux-gnueabihf/libogg.so* /janus-gateway/build/usr/lib
 
 WORKDIR /janus-gateway
 
