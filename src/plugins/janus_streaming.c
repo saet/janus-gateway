@@ -887,6 +887,7 @@ multistream-test: {
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/un.h>
 
 #include <jansson.h>
 
@@ -6714,6 +6715,35 @@ static int janus_streaming_create_fd(int port, in_addr_t mcast, const janus_netw
 	janus_mutex_unlock(&fd_mutex);
 	return fd;
 }
+
+static int janus_streaming_create_unix_fd(int port, const char *medianame, const char *mountpointname) {
+    char socket_name[64];
+    struct sockaddr_un name;
+
+    int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if(fd < 0) {
+        JANUS_LOG(LOG_ERR, "[%s] Cannot create socket for %s...\n", mountpointname, medianame);
+        return -1;
+    }
+
+    sprintf(socket_name, "/tmp/videomux.%d", port);
+    JANUS_LOG(LOG_VERB, "Saet listening stream on unix socket: %s\n", socket_name);
+    unlink(socket_name);
+
+    memset(&name, 0, sizeof(struct sockaddr_un));
+
+    name.sun_family = AF_UNIX;
+    strncpy(name.sun_path, socket_name, sizeof(name.sun_path) - 1);
+
+    /* Bind to the specified port */
+    if(bind(fd, (const struct sockaddr *)&name, sizeof(struct sockaddr_un)) < 0) {
+        JANUS_LOG(LOG_ERR, "[%s] Bind failed for %s (port %d)...\n", mountpointname, medianame, port);
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
 /* Helper to bind RTP/RTCP port pair (for RTSP) */
 static int janus_streaming_allocate_port_pair(const char *name, const char *media,
 		in_addr_t mcast, const janus_network_address *iface, multiple_fds *fds, int ports[2]) {
@@ -6741,9 +6771,13 @@ static int janus_streaming_allocate_port_pair(const char *name, const char *medi
 			rtp_port_next = rtp_range_min;
 			rtp_port_wrap = TRUE;
 		}
-		rtp_fd = janus_streaming_create_fd(rtp_port, mcast, iface, NULL, 0, media, media, name, TRUE);
+        // SAET-EDIT
+        //rtp_fd = janus_streaming_create_fd(rtp_port, mcast, iface, NULL, 0, media, media, name, TRUE);
+        rtp_fd = janus_streaming_create_unix_fd(rtp_port, media, name);
 		if(rtp_fd != -1) {
-			rtcp_fd = janus_streaming_create_fd(rtcp_port, mcast, iface, NULL, 0, media, media, name, TRUE);
+            // SAET-EDIT
+            //rtcp_fd = janus_streaming_create_fd(rtcp_port, mcast, iface, NULL, 0, media, media, name, TRUE);
+            rtcp_fd = janus_streaming_create_unix_fd(rtcp_port, media, name);
 			if(rtcp_fd != -1) {
 				/* Done */
 				fds->fd = rtp_fd;
@@ -6890,16 +6924,20 @@ janus_streaming_rtp_source_stream *janus_streaming_create_rtp_source_stream(
 	int rtcp_fd = -1;
 	char host[46];
 	host[0] = '\0';
-	fd[0] = janus_streaming_create_fd(port, mcast ? inet_addr(mcast) : INADDR_ANY, iface,
-		host, sizeof(host), type, type, name, port == 0);
+    // SAET-EDIT
+	//fd[0] = janus_streaming_create_fd(port, mcast ? inet_addr(mcast) : INADDR_ANY, iface,
+	//	host, sizeof(host), type, type, name, port == 0);
+    fd[0] = janus_streaming_create_unix_fd(port, type, name);
 	if(fd[0] < 0) {
 		JANUS_LOG(LOG_ERR, "[%s] Can't bind to port %d...\n", name, port);
 		return NULL;
 	}
 	port = janus_streaming_get_fd_port(fd[0]);
 	if(dortcp) {
-		rtcp_fd = janus_streaming_create_fd(rtcpport, mcast ? inet_addr(mcast) : INADDR_ANY, iface,
-			NULL, 0, type, type, name, rtcpport == 0);
+        // SAET-EDIT
+		//rtcp_fd = janus_streaming_create_fd(rtcpport, mcast ? inet_addr(mcast) : INADDR_ANY, iface,
+		//	NULL, 0, type, type, name, rtcpport == 0);
+        rtcp_fd = janus_streaming_create_unix_fd(rtcpport, type, name);
 		if(rtcp_fd < 0) {
 			JANUS_LOG(LOG_ERR, "[%s] Can't bind to port %d for RTCP...\n", name, rtcpport);
 			if(fd[0] > -1)
@@ -6910,9 +6948,11 @@ janus_streaming_rtp_source_stream *janus_streaming_create_rtp_source_stream(
 	}
 	if(mtype == JANUS_STREAMING_MEDIA_VIDEO) {
 		if(simulcast) {
-			fd[1] = janus_streaming_create_fd(port2, mcast ? inet_addr(mcast) : INADDR_ANY, iface,
-				NULL, 0, "Video", "video", name, FALSE);
-			if(fd[1] < 0) {
+            // SAET-EDIT
+			//fd[1] = janus_streaming_create_fd(port2, mcast ? inet_addr(mcast) : INADDR_ANY, iface,
+			//	NULL, 0, "Video", "video", name, FALSE);
+            fd[1] = janus_streaming_create_unix_fd(port2, "video", name);
+            if(fd[1] < 0) {
 				JANUS_LOG(LOG_ERR, "[%s] Can't bind to port %d for video (2nd port)...\n", name, port2);
 				if(fd[0] > -1)
 					close(fd[0]);
@@ -6921,9 +6961,11 @@ janus_streaming_rtp_source_stream *janus_streaming_create_rtp_source_stream(
 				return NULL;
 			}
 			port2 = janus_streaming_get_fd_port(fd[1]);
-			fd[2] = janus_streaming_create_fd(port3, mcast ? inet_addr(mcast) : INADDR_ANY, iface,
-				NULL, 0, "Video", "video", name, FALSE);
-			if(fd[2] < 0) {
+            // SAET-EDIT
+			//fd[2] = janus_streaming_create_fd(port3, mcast ? inet_addr(mcast) : INADDR_ANY, iface,
+			//	NULL, 0, "Video", "video", name, FALSE);
+            fd[2] = janus_streaming_create_unix_fd(port3, "video", name);
+            if(fd[2] < 0) {
 				JANUS_LOG(LOG_ERR, "[%s] Can't bind to port %d for video (3rd port)...\n", name, port3);
 				if(fd[0] > -1)
 					close(fd[0]);
