@@ -4859,7 +4859,6 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 				return G_SOURCE_CONTINUE;
 			}
 			medium->noerrorlog = FALSE;
-			/* TODO Support binary data */
 			janus_dtls_wrap_sctp_data(pc->dtls, pkt->label, pkt->protocol,
 				pkt->type == JANUS_ICE_PACKET_TEXT, pkt->data, pkt->length);
 #endif

@@ -4156,6 +4156,8 @@ void janus_plugin_relay_data(janus_plugin_session *plugin_session, janus_plugin_
 			|| janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT))
 		return;
 #ifdef HAVE_SCTP
+    // SAET-EDIT
+    packet->binary = TRUE;
 	janus_ice_relay_data(handle, packet);
 #else
 	JANUS_LOG(LOG_WARN, "Asked to relay data, but Data Channels support has not been compiled...\n");
