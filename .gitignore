@@ -1,3 +1,9 @@
+.idea
+.vscode
+plugins/janus_frame.c
+plugins/janus_videomux.c
+plugins/janus_ptz.c
+
 cmdline.c
 cmdline.h
 version.c
