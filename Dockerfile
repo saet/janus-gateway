@@ -1,23 +1,23 @@
-ARG BASE_IMAGE=arm32v7/debian:buster
+FROM debian:12-slim AS base
 
-FROM ${BASE_IMAGE} AS clean-env
+FROM base AS builder
 
 # install build tools and janus dependencies
 RUN apt-get update && \
-    apt-get install -y apt-utils software-properties-common git build-essential \
+    apt-get install --no-install-recommends -y apt-utils software-properties-common git build-essential \
     	libmicrohttpd-dev libjansson-dev \
 		libssl-dev libsofia-sip-ua-dev libglib2.0-dev \
 		libopus-dev libogg-dev libcurl4-openssl-dev liblua5.3-dev \
-		libconfig-dev pkg-config libtool automake python3 python3-pip python3-setuptools python3-wheel ninja-build && \
-    pip3 install meson
+		libconfig-dev pkg-config libtool automake python3 python3-pip python3-setuptools python3-wheel ninja-build meson \
+     	gengetopt libsrtp2-dev
 
 # install libsrtp with openssl support on armv7 only for aes_gcm_128_16 support
 WORKDIR /
 RUN git clone https://github.com/cisco/libsrtp.git && \
     cd libsrtp && \
 	git checkout 90d05bf8980d16e4ac3f16c19b77e296c4bc207b && \
-    ./configure --prefix=/usr --enable-openssl --enable-nss && \
-    make && \
+    ./configure --enable-openssl --enable-nss && \
+    make -j$(nproc) && \
     make install && \
     make DESTDIR=/janus-gateway/build install
 
@@ -27,8 +27,8 @@ RUN git clone https://github.com/sctplab/usrsctp && \
     cd usrsctp && \
 	git checkout 87f52843f9cf7dda0d4239ec22946ab922f98876 && \
     ./bootstrap && \
-    ./configure --prefix=/usr --disable-programs --disable-inet --disable-inet6 && \
-    make && \
+    ./configure --disable-programs --disable-inet --disable-inet6 && \
+    make -j$(nproc) && \
     make install && \
 	make DESTDIR=/janus-gateway/build install
 
@@ -37,34 +37,32 @@ WORKDIR /
 RUN git clone https://gitlab.freedesktop.org/libnice/libnice && \
     cd libnice && \
 	git checkout 3d9cae16a5094aadb1651572644cb5786a8b4e2d && \
-    meson --prefix=/usr build && \
+    meson build && \
     ninja -C build && \
     ninja -C build install && \
     DESTDIR=/janus-gateway/build ninja -C build install
 
-# export libogg since janus streaming plugins now requires it
-RUN mkdir -p /janus-gateway/build/usr/lib && \
-    cp -r /usr/lib/arm-linux-gnueabihf/libogg.so* /janus-gateway/build/usr/lib
-
-WORKDIR /janus-gateway
+WORKDIR /
 
 COPY . .
-
-FROM clean-env AS builder
 
 # build janus-gateway
 RUN sh autogen.sh && \
     ./configure --prefix=/opt/janus --disable-unix-sockets --disable-sample-event-handler --disable-gelf-event-handler \
-    --disable-plugin-audiobridge --disable-plugin-echotest --disable-plugin-recordplay --disable-plugin-sip \
-    --disable-plugin-nosip --disable-plugin-textroom --disable-plugin-videocall --disable-plugin-videoroom \
-    --disable-plugin-voicemail && \
+    --disable-all-plugins --enable-plugin-streaming --enable-plugin-videomux --enable-plugin-frame --enable-plugin-ptz && \
     make && \
     make DESTDIR=/janus-gateway/build install
 
-FROM builder as devbox
+FROM base
 
-# install some common utils for dev
-RUN apt-get update && \
-	apt-get install -y wget curl net-tools tree neovim nano
+WORKDIR /opt/janus
 
-ENTRYPOINT ["tail", "-F", "/dev/null"]
+COPY --from=builder /janus-gateway/build /
+
+RUN ldconfig -p && \
+    apt-get update && \
+    apt-get install --no-install-recommends -y libgio-qt0 libjansson4 openssl ca-certificates curl libmicrohttpd12 \
+    	libsrtp2-1 libconfig9 libogg0 && \
+    apt-get clean
+
+ENTRYPOINT ["/opt/janus/bin/janus", "-o", "-F", "/opt/videocloud/janus_config"]
